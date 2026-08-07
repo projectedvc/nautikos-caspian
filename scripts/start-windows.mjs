@@ -1,6 +1,7 @@
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFile } from "node:fs";
 import { createHash } from "node:crypto";
 import { createServer, request as proxyRequest } from "node:http";
+import { request as secureRequest } from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startProdServer } from "../node_modules/vinext/dist/server/prod-server.js";
@@ -133,10 +134,10 @@ const server = createServer((req, res) => {
     }
     const filename = path.join(localDataRoot, "tiles", "basemap", String(z), String(x), `${y}.jpg`);
     if (sendLocalFile(res, filename, "JUPYTER-LOCAL-BASEMAP")) return;
-    const upstream = proxyRequest({
-      protocol: "http:",
+    const upstream = secureRequest({
+      protocol: "https:",
       hostname: "server.arcgisonline.com",
-      port: 80,
+      port: 443,
       path: `/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
       method: "GET",
       headers: { "user-agent": "Nautikos-Caspian/1.0" },

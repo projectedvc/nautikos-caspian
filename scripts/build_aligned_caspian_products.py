@@ -55,6 +55,15 @@ def rgba_product(rgb: np.ndarray, alpha: np.ndarray) -> Image.Image:
     return Image.fromarray(np.dstack([rgb, np.clip(alpha, 0, 255).astype(np.uint8)]), "RGBA")
 
 
+def masked_gaussian(rgb: np.ndarray, mask: np.ndarray, sigma: float) -> np.ndarray:
+    weight = ndimage.gaussian_filter(mask.astype(np.float32), sigma)
+    channels = []
+    for channel in range(3):
+        numerator = ndimage.gaussian_filter(rgb[..., channel] * mask, sigma)
+        channels.append(numerator / np.maximum(weight, 1e-5))
+    return np.stack(channels, axis=-1)
+
+
 def save_product(folder: Path, name: str, image: Image.Image) -> None:
     path = folder / f"{name}.webp"
     image.save(path, "WEBP", quality=92, method=6, exact=True)
@@ -68,6 +77,21 @@ def main() -> None:
     reference = np.asarray(reference_image).astype(np.float32)
     water_by_year = {year: water_mask_from_shoreline(year, (width, height)) for year in YEARS}
     maximum_water = np.logical_or.reduce(list(water_by_year.values()))
+
+    # The regional source can contain radiometric seams between acquisition
+    # footprints over open water.  Reconstruct only the water radiometry from
+    # a broad colour field plus clipped fine texture.  Coast and land pixels
+    # remain untouched and the result still retains natural water variation.
+    broad_water = masked_gaussian(reference, maximum_water, 72)
+    local_water = masked_gaussian(reference, maximum_water, 4)
+    fine_texture = np.clip(reference - local_water, -6, 6)
+    water_surface = np.clip(broad_water + fine_texture * 0.45, 0, 255)
+    water_feather = ndimage.gaussian_filter(maximum_water.astype(np.float32), 1.2)[..., None]
+    reference = reference * (1 - water_feather) + water_surface * water_feather
+    reference = np.clip(reference, 0, 255)
+    Image.fromarray(reference.astype(np.uint8), "RGB").save(
+        REFERENCE_PATH, "WEBP", quality=94, method=6
+    )
 
     # Extrapolate a terrain texture from the nearest measured land pixel.  It
     # is used only where the annual shoreline says that former water is dry.
