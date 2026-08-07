@@ -82,7 +82,19 @@ def main() -> None:
     # footprints over open water.  Reconstruct only the water radiometry from
     # a broad colour field plus clipped fine texture.  Coast and land pixels
     # remain untouched and the result still retains natural water variation.
-    broad_water = masked_gaussian(reference, maximum_water, 72)
+    reduced_size = (max(256, width // 8), max(256, height // 8))
+    reduced_rgb = np.asarray(
+        Image.fromarray(reference.astype(np.uint8), "RGB").resize(reduced_size, Image.Resampling.LANCZOS)
+    ).astype(np.float32)
+    reduced_mask = np.asarray(
+        Image.fromarray(maximum_water.astype(np.uint8) * 255).resize(reduced_size, Image.Resampling.NEAREST)
+    ) > 0
+    broad_reduced = masked_gaussian(reduced_rgb, reduced_mask, 9)
+    broad_water = np.asarray(
+        Image.fromarray(np.clip(broad_reduced, 0, 255).astype(np.uint8), "RGB").resize(
+            (width, height), Image.Resampling.BICUBIC
+        )
+    ).astype(np.float32)
     local_water = masked_gaussian(reference, maximum_water, 4)
     fine_texture = np.clip(reference - local_water, -6, 6)
     water_surface = np.clip(broad_water + fine_texture * 0.45, 0, 255)
