@@ -185,7 +185,10 @@ def main() -> None:
         water = water_by_year[year]
         year_fraction = (year - 2020) / 6
 
-        dried = maximum_water & ~water
+        # Shoreline retreat is measured relative to the 2020 baseline.  Using
+        # the union of every yearly contour would incorrectly paint tiny
+        # georegistration differences as grey land patches in the 2020 frame.
+        dried = water_by_year[2020] & ~water
         dry_feather = ndimage.gaussian_filter(dried.astype(np.float32), 1.4)[..., None]
         annual_rgb = np.clip(reference * (1 - dry_feather) + sand * dry_feather, 0, 255).astype(np.uint8)
         save_product(folder, "true-color", Image.fromarray(annual_rgb, "RGB"))
