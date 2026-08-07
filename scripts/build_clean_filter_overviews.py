@@ -150,16 +150,18 @@ def build_year(year: int) -> None:
         valid_colour = original & (brightness > 52) & ((chroma > 11) | (brightness > 92))
         cleaned = smooth_rgb(rgb, valid_colour, sigma)
 
+        semantic_water = water_mask
+        if semantic_water.shape != original.shape:
+            semantic_water = np.asarray(
+                Image.fromarray(semantic_water.astype(np.uint8) * 255).resize(
+                    (original.shape[1], original.shape[0]), Image.Resampling.NEAREST
+                )
+            ) > 0
+
         if domain == "water":
-            semantic = water_mask
-            if semantic.shape != original.shape:
-                semantic = np.asarray(
-                    Image.fromarray(semantic.astype(np.uint8) * 255).resize(
-                        (original.shape[1], original.shape[0]), Image.Resampling.NEAREST
-                    )
-                ) > 0
+            semantic = semantic_water
         else:
-            semantic = robust_mask(original & ~water_mask, close_radius=3)
+            semantic = robust_mask(original & ~semantic_water, close_radius=3)
 
         # A constant semantic opacity prevents acquisition footprints in the
         # RGB mosaic below from reappearing as rectangular artefacts.  The
