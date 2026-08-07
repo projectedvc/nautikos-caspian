@@ -646,6 +646,65 @@ button { color: inherit; }
 .workspace-shell[data-theme="dark"] select { background: #132832; border-color: #35505b; color: #e9f1f4; }
 .workspace-shell[data-theme="dark"] .main-nav button.active,
 .workspace-shell[data-theme="dark"] .brand-lockup strong { color: #eff8fb; }
+.workspace-shell[data-theme="dark"] .main-nav button { color: #91a8b3; }
+.workspace-shell[data-theme="dark"] .brand-lockup span,
+.workspace-shell[data-theme="dark"] .panel-heading > span,
+.workspace-shell[data-theme="dark"] .inspector-head span,
+.workspace-shell[data-theme="dark"] .filter-group-title,
+.workspace-shell[data-theme="dark"] .filter-list small,
+.workspace-shell[data-theme="dark"] .sidebar-tools button small,
+.workspace-shell[data-theme="dark"] .timelapse-head > div > span,
+.workspace-shell[data-theme="dark"] .timelapse-range label span,
+.workspace-shell[data-theme="dark"] .map-statusbar { color: #8fa8b3; }
+.workspace-shell[data-theme="dark"] .panel-heading h1,
+.workspace-shell[data-theme="dark"] .inspector-head h2,
+.workspace-shell[data-theme="dark"] .filter-list strong,
+.workspace-shell[data-theme="dark"] .empty-inspector h3,
+.workspace-shell[data-theme="dark"] .solution-map-key h3,
+.workspace-shell[data-theme="dark"] .analysis-title h3 { color: #edf6f9; }
+.workspace-shell[data-theme="dark"] .sidebar-tabs button { color: #b7cbd3; }
+.workspace-shell[data-theme="dark"] .sidebar-tabs button.active {
+  border-color: #2882aa;
+  background: #123d50;
+  color: #8bd9f5;
+}
+.workspace-shell[data-theme="dark"] .filter-list button { color: #dce9ee; }
+.workspace-shell[data-theme="dark"] .filter-list button:hover { background: #142b35; }
+.workspace-shell[data-theme="dark"] .filter-list button.active {
+  border-color: #2b7799;
+  background: #143d4e;
+  box-shadow: inset 3px 0 #25a7df;
+}
+.workspace-shell[data-theme="dark"] .filter-list button.active .filter-icon {
+  background: #1b4b5e;
+  color: #8ee0ff;
+}
+.workspace-shell[data-theme="dark"] .timelapse-panel {
+  border-color: #38545f;
+  background: rgba(13, 28, 35, 0.96);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.38);
+}
+.workspace-shell[data-theme="dark"] .timelapse-head strong { color: #f1f8fa; }
+.workspace-shell[data-theme="dark"] .timelapse-range > span { color: #8da8b4; }
+.workspace-shell[data-theme="dark"] .timelapse-controls > span { color: #6fd0f4; }
+.workspace-shell[data-theme="dark"] .empty-inspector p,
+.workspace-shell[data-theme="dark"] .solution-map-key p,
+.workspace-shell[data-theme="dark"] .analysis-card > p,
+.workspace-shell[data-theme="dark"] .filter-guide p { color: #9cb2bc; }
+.workspace-shell[data-theme="dark"] .forecast-placeholder,
+.workspace-shell[data-theme="dark"] .ai-result,
+.workspace-shell[data-theme="dark"] .prediction-result,
+.workspace-shell[data-theme="dark"] .trend-chart {
+  border-color: #36515c;
+  background: #102832;
+  color: #bdd0d7;
+}
+.workspace-shell[data-theme="dark"] .empty-inspector > .secondary-action,
+.workspace-shell[data-theme="dark"] .inspector-head button {
+  border-color: #38505a;
+  background: #142a34;
+  color: #dce9ee;
+}
 
 @media (max-width: 1120px) {
   .workspace-shell { grid-template-columns: 225px minmax(470px, 1fr) 290px; }
