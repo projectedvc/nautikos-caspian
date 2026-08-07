@@ -152,6 +152,12 @@ def build_year(year: int) -> None:
 
         if domain == "water":
             semantic = water_mask
+            if semantic.shape != original.shape:
+                semantic = np.asarray(
+                    Image.fromarray(semantic.astype(np.uint8) * 255).resize(
+                        (original.shape[1], original.shape[0]), Image.Resampling.NEAREST
+                    )
+                ) > 0
         else:
             semantic = robust_mask(original & ~water_mask, close_radius=3)
 
