@@ -1,0 +1,58 @@
+{
+  "name": "site-creator-vinext-starter",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vinext dev",
+    "build": "vinext build",
+    "start": "vinext start",
+    "start:windows": "node scripts/start-windows.mjs",
+    "start:server": "node scripts/start-windows.mjs",
+    "cache:overview": "node scripts/prewarm-caspian.mjs",
+    "cache:imagery": "node scripts/prewarm-overviews.mjs",
+    "cache:timelapse": "node scripts/prewarm-timelapse.mjs",
+    "cache:pyramid": "node scripts/prewarm-fixed-pyramid.mjs",
+    "cache:fallbacks": "node scripts/build-local-filter-fallbacks.mjs",
+    "data:annual": "python scripts/build_local_caspian_cube.py --years all",
+    "data:products": "python scripts/build_local_products.py",
+    "data:monthly": "python scripts/build_monthly_overviews.py",
+    "data:tiles": "node scripts/prewarm-earth-engine.mjs",
+    "data:basemap": "node scripts/prewarm-regional-basemap.mjs",
+    "build:vercel": "next build",
+    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.2",
+    "lucide-react": "^1.28.0",
+    "maplibre-gl": "^6.1.0",
+    "next": "16.2.6",
+    "pngjs": "^7.0.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.37.1",
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/pngjs": "^6.0.5",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "drizzle-kit": "0.31.10",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "react-server-dom-webpack": "19.2.6",
+    "tailwindcss": "4.2.1",
+    "typescript": "5.9.3",
+    "vinext": "0.0.50",
+    "vite": "8.0.13",
+    "wrangler": "4.92.0"
+  },
+  "type": "module"
+}

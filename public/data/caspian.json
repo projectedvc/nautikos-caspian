@@ -1,0 +1,237 @@
+{
+  "generatedAt": "2026-08-05T07:48:18.276501Z",
+  "aoi": {
+    "name": "Aktau coastal pilot",
+    "bbox": [
+      51.08,
+      43.5,
+      51.43,
+      43.83
+    ],
+    "center": [
+      51.18,
+      43.66
+    ]
+  },
+  "series": [
+    {
+      "key": "2025-09",
+      "label": "сен 25",
+      "date": "2025-09-16",
+      "cloud": 0.1,
+      "image": "/data/sentinel/2025-09.webp",
+      "itemId": "S2B_T39TWJ_20250916T072945_L2A",
+      "source": "Copernicus Sentinel-2 L2A via Earth Search/AWS Open Data"
+    },
+    {
+      "key": "2025-10",
+      "label": "окт 25",
+      "date": "2025-10-06",
+      "cloud": 0.2,
+      "image": "/data/sentinel/2025-10.webp",
+      "itemId": "S2B_T39TWJ_20251006T073145_L2A",
+      "source": "Copernicus Sentinel-2 L2A via Earth Search/AWS Open Data"
+    },
+    {
+      "key": "2025-11",
+      "label": "ноя 25",
+      "date": "2025-11-10",
+      "cloud": 0.2,
+      "image": "/data/sentinel/2025-11.webp",
+      "itemId": "S2C_T39TWJ_20251110T073155_L2A",
+      "source": "Copernicus Sentinel-2 L2A via Earth Search/AWS Open Data"
+    },
+    {
+      "key": "2025-12",
+      "label": "дек 25",
+      "date": "2025-12-30",
+      "cloud": 33.3,
+      "image": "/data/sentinel/2025-12.webp",
+      "itemId": "S2C_T39TWJ_20251230T073328_L2A",
+      "source": "Copernicus Sentinel-2 L2A via Earth Search/AWS Open Data"
+    },
+    {
+      "key": "2026-01",
+      "label": "янв 26",
+      "date": "2026-01-19",
+      "cloud": 17.5,
+      "image": "/data/sentinel/2026-01.webp",
+      "itemId": "S2C_T39TWJ_20260119T073231_L2A",
+      "source": "Copernicus Sentinel-2 L2A via Earth Search/AWS Open Data"
+    },
+    {
+      "key": "2026-02",
+      "label": "фев 26",
+      "date": "2026-02-18",
+      "cloud": 39.6,
+      "image": "/data/sentinel/2026-02.webp",
+      "itemId": "S2C_T39TWJ_20260218T073149_L2A",
+      "source": "Copernicus Sentinel-2 L2A via Earth Search/AWS Open Data"
+    },
+    {
+      "key": "2026-03",
+      "label": "мар 26",
+      "date": "2026-03-10",
+      "cloud": 4.2,
+      "image": "/data/sentinel/2026-03.webp",
+      "itemId": "S2C_T39TWJ_20260310T073350_L2A",
+      "source": "Copernicus Sentinel-2 L2A via Earth Search/AWS Open Data"
+    },
+    {
+      "key": "2026-04",
+      "label": "апр 26",
+      "date": "2026-04-04",
+      "cloud": 35.5,
+      "image": "/data/sentinel/2026-04.webp",
+      "itemId": "S2B_T39TWJ_20260404T073525_L2A",
+      "source": "Copernicus Sentinel-2 L2A via Earth Search/AWS Open Data"
+    },
+    {
+      "key": "2026-05",
+      "label": "май 26",
+      "date": "2026-05-21",
+      "cloud": 0.1,
+      "image": "/data/sentinel/2026-05.webp",
+      "itemId": "S2A_T39TWJ_20260521T073442_L2A",
+      "source": "Copernicus Sentinel-2 L2A via Earth Search/AWS Open Data"
+    },
+    {
+      "key": "2026-06",
+      "label": "июн 26",
+      "date": "2026-06-10",
+      "cloud": 0.9,
+      "image": "/data/sentinel/2026-06.webp",
+      "itemId": "S2A_T39TWJ_20260610T073441_L2A",
+      "source": "Copernicus Sentinel-2 L2A via Earth Search/AWS Open Data"
+    },
+    {
+      "key": "2026-07",
+      "label": "июл 26",
+      "date": "2026-07-28",
+      "cloud": 0.1,
+      "image": "/data/sentinel/2026-07.webp",
+      "itemId": "S2C_T39TWJ_20260728T073608_L2A",
+      "source": "Copernicus Sentinel-2 L2A via Earth Search/AWS Open Data"
+    },
+    {
+      "key": "2026-08",
+      "label": "авг 26",
+      "date": "2026-08-02",
+      "cloud": 13.6,
+      "image": "/data/sentinel/2026-08.webp",
+      "itemId": "S2B_T39TWJ_20260802T073603_L2A",
+      "source": "Copernicus Sentinel-2 L2A via Earth Search/AWS Open Data"
+    }
+  ],
+  "layers": {
+    "change": "/data/change.png",
+    "suitability": "/data/suitability.png",
+    "vegetation": "/data/vegetation-anomaly.png"
+  },
+  "metrics": {
+    "scenes": 12,
+    "latestDate": "2026-08-02",
+    "changedAreaKm2": 5.7,
+    "waterChangeKm2": 12.4,
+    "restorationCandidateKm2": 29.8,
+    "meanCloud": 12.1
+  },
+  "events": [
+    {
+      "id": "change-1",
+      "kind": "change",
+      "title": "Устойчивое изменение покрова",
+      "coordinates": [
+        51.20396,
+        43.79563
+      ],
+      "score": 0.247,
+      "confidence": 81,
+      "action": "Сравнить исходный пиксель и отправить участок на полевую проверку.",
+      "evidence": "Sentinel-2 L2A · временной сигнал · проверка на облачность"
+    },
+    {
+      "id": "change-2",
+      "kind": "change",
+      "title": "Устойчивое изменение покрова",
+      "coordinates": [
+        51.10187,
+        43.71312
+      ],
+      "score": 0.039,
+      "confidence": 61,
+      "action": "Сравнить исходный пиксель и отправить участок на полевую проверку.",
+      "evidence": "Sentinel-2 L2A · временной сигнал · проверка на облачность"
+    },
+    {
+      "id": "change-3",
+      "kind": "change",
+      "title": "Устойчивое изменение покрова",
+      "coordinates": [
+        51.24771,
+        43.74063
+      ],
+      "score": 0.037,
+      "confidence": 61,
+      "action": "Сравнить исходный пиксель и отправить участок на полевую проверку.",
+      "evidence": "Sentinel-2 L2A · временной сигнал · проверка на облачность"
+    },
+    {
+      "id": "restore-1",
+      "kind": "restore",
+      "title": "Кандидат на восстановление",
+      "coordinates": [
+        51.11646,
+        43.82312
+      ],
+      "score": 0.967,
+      "confidence": 94,
+      "action": "Проверить засоление, воду и выбрать местные кустарники вместо массовой посадки деревьев.",
+      "evidence": "Sentinel-2 L2A · временной сигнал · проверка на облачность"
+    },
+    {
+      "id": "restore-2",
+      "kind": "restore",
+      "title": "Кандидат на восстановление",
+      "coordinates": [
+        51.13104,
+        43.76812
+      ],
+      "score": 0.963,
+      "confidence": 94,
+      "action": "Проверить засоление, воду и выбрать местные кустарники вместо массовой посадки деревьев.",
+      "evidence": "Sentinel-2 L2A · временной сигнал · проверка на облачность"
+    },
+    {
+      "id": "vegetation-1",
+      "kind": "vegetation",
+      "title": "Аномальный рост растительности",
+      "coordinates": [
+        51.13104,
+        43.67188
+      ],
+      "score": 0.003,
+      "confidence": 58,
+      "action": "Провести фотофиксацию: спутник отмечает участок, но вид растения подтверждает эксперт.",
+      "evidence": "Sentinel-2 L2A · временной сигнал · проверка на облачность"
+    },
+    {
+      "id": "vegetation-2",
+      "kind": "vegetation",
+      "title": "Аномальный рост растительности",
+      "coordinates": [
+        51.32062,
+        43.71312
+      ],
+      "score": 0.003,
+      "confidence": 58,
+      "action": "Провести фотофиксацию: спутник отмечает участок, но вид растения подтверждает эксперт.",
+      "evidence": "Sentinel-2 L2A · временной сигнал · проверка на облачность"
+    }
+  ],
+  "method": {
+    "current": "Hybrid EO baseline: NDVI/NDWI time series + robust temporal anomaly scoring",
+    "next": "AlphaEarth annual embeddings + Prithvi-EO-2.0 fine-tuning with field labels",
+    "caveat": "Species and final planting decisions require field verification, soil salinity and water constraints."
+  }
+}
