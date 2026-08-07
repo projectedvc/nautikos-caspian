@@ -72,7 +72,7 @@ type FilterDefinition = {
 const CASPIAN_BBOX: BBox = [46.0, 36.0, 55.8, 47.4];
 const REGIONAL_BASEMAP_BBOX: BBox = [25, 25, 75, 60];
 const YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
-const OVERVIEW_CACHE_VERSION = 19;
+const OVERVIEW_CACHE_VERSION = 20;
 const TIMELAPSE_CACHE_VERSION = 16;
 const MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 const WATER_FILTERS: ViewKey[] = ["optical", "waterOptical", "water", "oil", "chlorophyll", "suspendedMatter", "waterTemperature", "shoreline"];
@@ -343,7 +343,7 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
     tiles: [annualTileUrl(year, detailPhotoLayer, version)],
     // The whole-basin view uses the seamless normalised overview. Native
     // Sentinel-2 tiles take over only after zooming into a smaller area.
-    tileSize: 512,
+    tileSize: 256,
     minzoom: 6,
     maxzoom: nativeTileMaxZoom(detailPhotoLayer),
     bounds: CASPIAN_BBOX,
@@ -375,7 +375,7 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
     map.addSource("annual-filter-tiles", {
       type: "raster",
       tiles: [annualTileUrl(year, layer, version)],
-      tileSize: 512,
+      tileSize: 256,
       minzoom: 6,
       maxzoom: nativeTileMaxZoom(layer),
       bounds: CASPIAN_BBOX,
@@ -458,7 +458,7 @@ export default function CaspianTwin() {
   const [mapsReady, setMapsReady] = useState(0);
   const [swipe, setSwipe] = useState(50);
   const [compareEnabled, setCompareEnabled] = useState(true);
-  const tileVersion = 23;
+  const tileVersion = 24;
   const [timelapseFromYear, setTimelapseFromYear] = useState(2020);
   const [timelapseToYear, setTimelapseToYear] = useState(2026);
   const [timelapseYear, setTimelapseYear] = useState(2020);
@@ -588,8 +588,8 @@ export default function CaspianTwin() {
       if (primary.isStyleLoaded()) updateMonthlyFrame(primary, timelapseYear, timelapseMonth, tileVersion);
       return;
     }
-    if (primary.isStyleLoaded()) updateAnnualTiles(primary, compareEnabled ? beforeYear : afterYear, activeFilter.layer, tileVersion);
-    if (comparison.isStyleLoaded()) updateAnnualTiles(comparison, afterYear, activeFilter.layer, tileVersion);
+    updateAnnualTiles(primary, compareEnabled ? beforeYear : afterYear, activeFilter.layer, tileVersion);
+    updateAnnualTiles(comparison, afterYear, activeFilter.layer, tileVersion);
   }, [activeFilter.layer, afterYear, beforeYear, compareEnabled, mapsReady, tileVersion, timelapseMonth, timelapseYear, workspaceMode]);
 
   useEffect(() => {
