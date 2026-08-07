@@ -46,6 +46,31 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
+const localDataRoot = process.env.NAUTIKOS_DATA_DIR ?? path.join(projectRoot, "data");
+
+function contentTypeFor(filename) {
+  return mime[path.extname(filename).toLowerCase()] ?? "application/octet-stream";
+}
+
+function sendLocalFile(res, filename, source) {
+  if (!existsSync(filename) || !statSync(filename).isFile()) return false;
+  res.writeHead(200, {
+    ...corsHeaders,
+    "Content-Type": contentTypeFor(filename),
+    "Content-Length": statSync(filename).size,
+    "Cache-Control": "public, max-age=31536000, immutable",
+    "X-Nautikos-Source": source,
+  });
+  createReadStream(filename).pipe(res);
+  return true;
+}
+
+function integerParameter(url, name) {
+  const raw = url.searchParams.get(name);
+  if (raw === null || raw.trim() === "") return Number.NaN;
+  return Number(raw);
+}
+
 const backend = await startProdServer({
   port: innerPort,
   host: upstreamHost,
@@ -63,6 +88,82 @@ const server = createServer((req, res) => {
   if (rawPath === "/health") {
     res.writeHead(200, { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ status: "ok", service: "nautikos", dataMode: "local" }));
+    return;
+  }
+
+  // Jupyter is the authoritative data backend.  Serve immutable local
+  // products here, before the application router, so a stale framework build
+  // can never make the map fall back to white placeholders or another scene.
+  if (req.method === "GET" && rawPath === "/api/sentinel/process") {
+    const url = new URL(req.url ?? rawPath, `http://${host}:${outerPort}`);
+    const year = integerParameter(url, "year");
+    const month = integerParameter(url, "month");
+    const layer = url.searchParams.get("layer") ?? "true-color";
+    const z = integerParameter(url, "z");
+    const x = integerParameter(url, "x");
+    const y = integerParameter(url, "y");
+    const candidates = [];
+    if (Number.isInteger(year) && Number.isInteger(z) && Number.isInteger(x) && Number.isInteger(y)) {
+      for (const extension of ["webp", "jpg", "png"]) {
+        candidates.push(path.join(localDataRoot, "tiles", layer, String(year), String(z), String(x), `${y}.${extension}`));
+      }
+    } else if (Number.isInteger(year) && Number.isInteger(month)) {
+      candidates.push(path.join(projectRoot, "public", "overviews", "monthly", String(year), `${String(month).padStart(2, "0")}.webp`));
+    } else if (Number.isInteger(year)) {
+      candidates.push(path.join(projectRoot, "public", "overviews", "annual", String(year), `${layer}.webp`));
+    }
+    for (const candidate of candidates) {
+      if (sendLocalFile(res, candidate, "JUPYTER-LOCAL")) return;
+    }
+    if (Number.isInteger(year)) {
+      res.writeHead(404, { ...corsHeaders, "Cache-Control": "no-store", "X-Nautikos-Source": "LOCAL-MISS" }).end();
+      return;
+    }
+  }
+
+  if (req.method === "GET" && rawPath === "/api/basemap") {
+    const url = new URL(req.url ?? rawPath, `http://${host}:${outerPort}`);
+    const z = integerParameter(url, "z");
+    const x = integerParameter(url, "x");
+    const y = integerParameter(url, "y");
+    if (![z, x, y].every(Number.isInteger) || z < 3 || z > 16 || x < 0 || y < 0) {
+      res.writeHead(400, { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "Valid z/x/y are required" }));
+      return;
+    }
+    const filename = path.join(localDataRoot, "tiles", "basemap", String(z), String(x), `${y}.jpg`);
+    if (sendLocalFile(res, filename, "JUPYTER-LOCAL-BASEMAP")) return;
+    const upstream = proxyRequest({
+      protocol: "http:",
+      hostname: "server.arcgisonline.com",
+      port: 80,
+      path: `/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
+      method: "GET",
+      headers: { "user-agent": "Nautikos-Caspian/1.0" },
+    }, (upstreamResponse) => {
+      if (upstreamResponse.statusCode !== 200) {
+        res.writeHead(upstreamResponse.statusCode ?? 502, corsHeaders);
+        upstreamResponse.pipe(res);
+        return;
+      }
+      const chunks = [];
+      upstreamResponse.on("data", (chunk) => chunks.push(chunk));
+      upstreamResponse.on("end", () => {
+        const bytes = Buffer.concat(chunks);
+        mkdirSync(path.dirname(filename), { recursive: true });
+        writeFile(filename, bytes, () => {});
+        res.writeHead(200, {
+          ...corsHeaders,
+          "Content-Type": bytes[0] === 0x89 && bytes[1] === 0x50 ? "image/png" : "image/jpeg",
+          "Content-Length": bytes.length,
+          "Cache-Control": "public, max-age=31536000, immutable",
+          "X-Nautikos-Source": "JUPYTER-CACHED-ON-DEMAND",
+        });
+        res.end(bytes);
+      });
+    });
+    upstream.on("error", () => res.writeHead(502, corsHeaders).end("Satellite basemap unavailable"));
+    upstream.end();
     return;
   }
   let decodedPath;

@@ -72,7 +72,7 @@ type FilterDefinition = {
 const CASPIAN_BBOX: BBox = [46.0, 36.0, 55.8, 47.4];
 const REGIONAL_BASEMAP_BBOX: BBox = [25, 25, 75, 60];
 const YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
-const OVERVIEW_CACHE_VERSION = 25;
+const OVERVIEW_CACHE_VERSION = 27;
 const TIMELAPSE_CACHE_VERSION = 16;
 const MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 const WATER_FILTERS: ViewKey[] = ["optical", "waterOptical", "water", "oil", "chlorophyll", "suspendedMatter", "waterTemperature", "shoreline"];
@@ -91,13 +91,13 @@ const regions: Region[] = [
 const filters: FilterDefinition[] = [
   {
     id: "optical",
-    label: "Бесшовный снимок Каспия",
-    subtitle: "Единая RGB‑подложка · HD при приближении",
+    label: "Снимок и граница воды",
+    subtitle: "Единая RGB‑сетка · Sentinel‑2 · 2020–2026",
     dataset: "s2",
     layer: "true-color",
     icon: Satellite,
     legend: [],
-    explanation: "Единая спутниковая подложка используется как стабильный визуальный контекст без границ орбит и без смены изображения при масштабировании. Годовые изменения показывают аналитические слои Sentinel и береговая маска; при приближении подложка догружается в более высоком разрешении и сохраняет геометрическое совмещение.",
+    explanation: "Каждый год совмещён с одной и той же спутниковой подложкой и измеренной границей воды. Поэтому шторка показывает изменение площади и берега без смещения снимка; при детальном приближении проявляется тайловая HD‑подложка Jupyter.",
   },
   {
     id: "waterOptical",
@@ -318,11 +318,11 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
     [west, north], [east, north], [east, south], [west, south],
   ];
 
-  // The photo context is one continuous satellite pyramid at every zoom.  It
-  // is deliberately independent from annual Sentinel acquisitions: otherwise
-  // orbit edges reappear and zooming swaps the visible scene. Year-specific
-  // information is rendered only as the analytical overlay below.
-  if (layer !== "true-color") {
+  // Every annual product uses the same bbox and exact pixel grid.  True colour
+  // carries the measured yearly water extent at basin scale and fades into the
+  // same HD satellite pyramid at detailed zooms, so the image never jumps to a
+  // different acquisition footprint.
+  {
     map.addSource("annual-filter-overview", {
       type: "image",
       url: annualOverviewUrl(year, layer, version),
@@ -333,9 +333,14 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
       type: "raster",
       source: "annual-filter-overview",
       maxzoom: 24,
-      paint: { "raster-opacity": 1, "raster-fade-duration": 0, "raster-resampling": "linear" },
+      paint: {
+        "raster-opacity": layer === "true-color"
+          ? ["interpolate", ["linear"], ["zoom"], 3, 0.96, 7, 0.88, 9, 0.28, 10, 0]
+          : 0.86,
+        "raster-fade-duration": 0,
+        "raster-resampling": "linear",
+      },
     }, "place-labels");
-
   }
 
   if (layer !== "true-color") {
