@@ -5,7 +5,11 @@ const apiBase = process.env.NAUTIKOS_API_BASE_URL?.replace(/\/$/, "");
 const nextConfig: NextConfig = {
   async rewrites() {
     if (!apiBase) return [];
-    return [{ source: "/api/:path*", destination: `${apiBase}/api/:path*` }];
+    return {
+      beforeFiles: [{ source: "/api/:path*", destination: `${apiBase}/api/:path*` }],
+      afterFiles: [],
+      fallback: [],
+    };
   },
 };
 
