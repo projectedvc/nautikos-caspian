@@ -21,6 +21,7 @@ BACKUP_ROOT = DATA_ROOT / "quality-source-overlays"
 YEARS = range(2020, 2027)
 
 CONFIG = {
+    "olci-true-color": (24.0, 242, "water"),
     "shoreline": (1.0, 215, "water"),
     "water-quality": (30.0, 246, "water"),
     "chlorophyll": (34.0, 246, "water"),

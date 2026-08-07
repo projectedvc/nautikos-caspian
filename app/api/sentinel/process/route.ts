@@ -24,6 +24,7 @@ const LAST_YEAR = 2026;
 const WATER_BODIES_300M = "byoc-c19a3068-8be5-4077-8233-1dc54fbffe31";
 const LAKE_SURFACE_TEMPERATURE_1KM = "byoc-401ca642-a169-4783-b1cf-cbd33e98eccb";
 const LOCAL_DATA_ROOT = process.env.NAUTIKOS_DATA_DIR ?? "D:\\CaspianTwinData\\cube";
+const DATA_BACKEND = process.env.NAUTIKOS_DATA_BACKEND?.replace(/\/$/, "");
 
 let tokenCache: { value: string; expiresAt: number } | null = null;
 let tokenRequest: Promise<string> | null = null;
@@ -351,8 +352,11 @@ function imageResponse(bytes: Uint8Array, source: string, scene: string, hit: bo
 }
 
 async function localProductResponse(relativePath: string) {
-  const fullPath = path.join(LOCAL_DATA_ROOT, relativePath);
-  if (!existsSync(fullPath)) return null;
+  const candidates = relativePath.startsWith(`overviews${path.sep}`)
+    ? [path.join(process.cwd(), "public", relativePath), path.join(LOCAL_DATA_ROOT, relativePath)]
+    : [path.join(LOCAL_DATA_ROOT, relativePath)];
+  const fullPath = candidates.find((candidate) => existsSync(candidate));
+  if (!fullPath) return null;
   const bytes = await readFile(fullPath);
   const contentType = bytes[0] === 0x89 && bytes[1] === 0x50
     ? "image/png"
@@ -369,6 +373,22 @@ async function localProductResponse(relativePath: string) {
       "x-nautikos-path": relativePath.replaceAll("\\", "/"),
     },
   });
+}
+
+async function proxyToDataBackend(request: Request) {
+  if (!DATA_BACKEND) return null;
+  const incoming = new URL(request.url);
+  const target = new URL(`${incoming.pathname}${incoming.search}`, `${DATA_BACKEND}/`);
+  const response = await fetch(target, {
+    method: request.method,
+    headers: request.method === "POST" ? { "content-type": request.headers.get("content-type") ?? "application/json" } : undefined,
+    body: request.method === "POST" ? await request.arrayBuffer() : undefined,
+    cache: "no-store",
+    signal: AbortSignal.timeout(25_000),
+  });
+  const headers = new Headers(response.headers);
+  headers.set("x-nautikos-gateway", "JUPYTER-DATA-BACKEND");
+  return new Response(response.body, { status: response.status, headers });
 }
 
 async function firstLocalProduct(relativePaths: string[]) {
@@ -478,6 +498,8 @@ async function processImage(input: ProcessRequest) {
 }
 
 export async function POST(request: Request) {
+  const proxied = await proxyToDataBackend(request);
+  if (proxied) return proxied;
   let input: ProcessRequest;
   try {
     input = await request.json() as ProcessRequest;
@@ -488,6 +510,8 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const proxied = await proxyToDataBackend(request);
+  if (proxied) return proxied;
   const url = new URL(request.url);
   const optionalNumber = (name: string) => {
     const raw = url.searchParams.get(name);

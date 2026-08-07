@@ -72,7 +72,7 @@ type FilterDefinition = {
 const CASPIAN_BBOX: BBox = [46.0, 36.0, 55.8, 47.4];
 const REGIONAL_BASEMAP_BBOX: BBox = [25, 25, 75, 60];
 const YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
-const OVERVIEW_CACHE_VERSION = 24;
+const OVERVIEW_CACHE_VERSION = 25;
 const TIMELAPSE_CACHE_VERSION = 16;
 const MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 const WATER_FILTERS: ViewKey[] = ["optical", "waterOptical", "water", "oil", "chlorophyll", "suspendedMatter", "waterTemperature", "shoreline"];
@@ -91,13 +91,13 @@ const regions: Region[] = [
 const filters: FilterDefinition[] = [
   {
     id: "optical",
-    label: "Детальный снимок Каспия",
-    subtitle: "Sentinel‑2 MSI · RGB · 10 м",
+    label: "Бесшовный снимок Каспия",
+    subtitle: "Единая RGB‑подложка · HD при приближении",
     dataset: "s2",
     layer: "true-color",
     icon: Satellite,
     legend: [],
-    explanation: "Облачность отфильтрована, а все тайлы построены из одного летнего композита выбранного года. Подходит для береговой линии, застройки, карьеров и нарушенного покрова; нативный предел RGB — 10 м на пиксель.",
+    explanation: "Единая спутниковая подложка используется как стабильный визуальный контекст без границ орбит и без смены изображения при масштабировании. Годовые изменения показывают аналитические слои Sentinel и береговая маска; при приближении подложка догружается в более высоком разрешении и сохраняет геометрическое совмещение.",
   },
   {
     id: "waterOptical",
@@ -260,11 +260,11 @@ function baseStyle(): StyleSpecification {
 }
 
 function annualOverviewUrl(year: number, layer: LayerKey, version: number) {
-  return `/overviews/annual/${year}/${layer}.webp?v=${version}-${OVERVIEW_CACHE_VERSION}`;
+  return `/api/sentinel/process?year=${year}&layer=${layer}&v=${version}-${OVERVIEW_CACHE_VERSION}`;
 }
 
 function regionalBasemapTileUrl() {
-  return `/api/basemap?z={z}&x={x}&y={y}&v=regional-surface-1`;
+  return `/api/basemap?z={z}&x={x}&y={y}&v=regional-surface-2`;
 }
 
 function addRegionalBasemap(map: MapLibreMap) {
@@ -274,7 +274,7 @@ function addRegionalBasemap(map: MapLibreMap) {
     tiles: [regionalBasemapTileUrl()],
     tileSize: 256,
     minzoom: 3,
-    maxzoom: 8,
+    maxzoom: 16,
     bounds: REGIONAL_BASEMAP_BBOX,
   });
   map.addLayer({
@@ -318,44 +318,11 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
     [west, north], [east, north], [east, south], [west, south],
   ];
 
-  const detailPhotoLayer: LayerKey = layer === "olci-true-color" ? "olci-true-color" : "true-color";
-  map.addSource("annual-photo-overview", {
-    type: "image",
-    // The whole-sea fallback is the already cached Sentinel-2 composite. A
-    // full-Caspian OLCI mosaic is too expensive for an interactive request;
-    // OLCI activates as fixed tiles from z6 without replacing the base scene.
-    url: annualOverviewUrl(year, detailPhotoLayer, version),
-    coordinates,
-  });
-  map.addLayer({
-    id: "annual-photo-overview",
-    type: "raster",
-    source: "annual-photo-overview",
-    maxzoom: 6,
-    paint: { "raster-opacity": 1, "raster-fade-duration": 0, "raster-resampling": "linear" },
-  }, "place-labels");
-
-  // This is the same time-locked annual composite as the overview, exposed as
-  // a single XYZ pyramid. Zoom changes resolution only; it never selects a new
-  // acquisition or a different satellite image.
-  map.addSource("annual-photo-tiles", {
-    type: "raster",
-    tiles: [annualTileUrl(year, detailPhotoLayer, version)],
-    // The whole-basin view uses the seamless normalised overview. Native
-    // Sentinel-2 tiles take over only after zooming into a smaller area.
-    tileSize: 256,
-    minzoom: 6,
-    maxzoom: nativeTileMaxZoom(detailPhotoLayer),
-    bounds: CASPIAN_BBOX,
-  });
-  map.addLayer({
-    id: "annual-photo-tiles",
-    type: "raster",
-    source: "annual-photo-tiles",
-    paint: { "raster-opacity": 1, "raster-fade-duration": 0, "raster-resampling": "linear" },
-  }, "place-labels");
-
-  if (layer !== "true-color" && layer !== "olci-true-color") {
+  // The photo context is one continuous satellite pyramid at every zoom.  It
+  // is deliberately independent from annual Sentinel acquisitions: otherwise
+  // orbit edges reappear and zooming swaps the visible scene. Year-specific
+  // information is rendered only as the analytical overlay below.
+  if (layer !== "true-color") {
     map.addSource("annual-filter-overview", {
       type: "image",
       url: annualOverviewUrl(year, layer, version),
@@ -371,7 +338,7 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
 
   }
 
-  if (layer !== "true-color" && layer !== "olci-true-color") {
+  if (layer !== "true-color") {
     map.addSource("annual-filter-tiles", {
       type: "raster",
       tiles: [annualTileUrl(year, layer, version)],
