@@ -341,8 +341,10 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
   map.addSource("annual-photo-tiles", {
     type: "raster",
     tiles: [annualTileUrl(year, detailPhotoLayer, version)],
-    tileSize: 512,
-    minzoom: 5,
+    // Request the next, sharper pyramid level and display the 512 px payload
+    // as a retina tile. This removes the soft/pixelated whole-Caspian view.
+    tileSize: 256,
+    minzoom: 4,
     maxzoom: nativeTileMaxZoom(detailPhotoLayer),
     bounds: CASPIAN_BBOX,
   });
@@ -373,8 +375,8 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
     map.addSource("annual-filter-tiles", {
       type: "raster",
       tiles: [annualTileUrl(year, layer, version)],
-      tileSize: 512,
-      minzoom: 5,
+      tileSize: 256,
+      minzoom: 4,
       maxzoom: nativeTileMaxZoom(layer),
       bounds: CASPIAN_BBOX,
     });
@@ -456,7 +458,7 @@ export default function CaspianTwin() {
   const [mapsReady, setMapsReady] = useState(0);
   const [swipe, setSwipe] = useState(50);
   const [compareEnabled, setCompareEnabled] = useState(true);
-  const tileVersion = 21;
+  const tileVersion = 22;
   const [timelapseFromYear, setTimelapseFromYear] = useState(2020);
   const [timelapseToYear, setTimelapseToYear] = useState(2026);
   const [timelapseYear, setTimelapseYear] = useState(2020);
