@@ -21,16 +21,16 @@ BACKUP_ROOT = DATA_ROOT / "quality-source-overlays"
 YEARS = range(2020, 2027)
 
 CONFIG = {
-    "shoreline": (1.0, 178, "water"),
-    "water-quality": (5.5, 150, "water"),
-    "chlorophyll": (7.0, 146, "water"),
-    "suspended-matter": (8.0, 148, "water"),
-    "water-temperature": (24.0, 142, "water"),
-    "oil-roughness": (5.0, 158, "water"),
-    "vegetation": (4.0, 148, "land"),
-    "coast-moisture": (6.0, 146, "land"),
-    "soil-stress": (6.0, 148, "land"),
-    "erosion-risk": (5.0, 154, "land"),
+    "shoreline": (1.0, 215, "water"),
+    "water-quality": (5.5, 236, "water"),
+    "chlorophyll": (7.0, 236, "water"),
+    "suspended-matter": (8.0, 236, "water"),
+    "water-temperature": (24.0, 238, "water"),
+    "oil-roughness": (5.0, 236, "water"),
+    "vegetation": (4.0, 190, "land"),
+    "coast-moisture": (6.0, 190, "land"),
+    "soil-stress": (6.0, 190, "land"),
+    "erosion-risk": (5.0, 194, "land"),
 }
 
 TARGET_WIDTH = 1536
@@ -50,6 +50,36 @@ def robust_mask(mask: np.ndarray, *, close_radius: int) -> np.ndarray:
         keep[0] = False
         mask = keep[labels]
     return ndimage.binary_fill_holes(mask)
+
+
+def water_mask_from_true_color(folder: Path, fallback: np.ndarray) -> np.ndarray:
+    """Recover one continuous Caspian water body from the annual RGB mosaic.
+
+    Product rasters are assembled from several satellite footprints and their
+    alpha channels can contain long rectangular gaps.  Those gaps must never
+    become holes in a water filter, so the semantic mask is derived from the
+    RGB colour itself and only the largest connected water body is retained.
+    """
+    rgb = np.asarray(Image.open(folder / "true-color.webp").convert("RGB"))
+    r, g, b = [rgb[..., channel].astype(np.float32) for channel in range(3)]
+    brightness = (r + g + b) / 3.0
+    colour_seed = (
+        (brightness < 168)
+        & (b > r * 1.08 + 2)
+        & (b > g * 0.56)
+        & ((g + b) > r * 1.72)
+    )
+    seed = colour_seed | fallback
+    seed = ndimage.binary_closing(seed, structure=disk(7))
+    labels, count = ndimage.label(seed)
+    if not count:
+        return robust_mask(fallback, close_radius=8)
+    sizes = np.bincount(labels.ravel())
+    sizes[0] = 0
+    mask = labels == int(np.argmax(sizes))
+    mask = ndimage.binary_closing(mask, structure=disk(13))
+    mask = ndimage.binary_fill_holes(mask)
+    return ndimage.binary_opening(mask, structure=disk(2))
 
 
 def nearest_fill(rgb: np.ndarray, valid: np.ndarray) -> np.ndarray:
@@ -92,7 +122,7 @@ def build_year(year: int) -> None:
     shore = np.asarray(Image.open(shore_path).convert("RGBA"))
     shore_alpha = shore[..., 3] > 15
     water_seed = shore_alpha & (shore[..., 2].astype(np.int16) > shore[..., 0].astype(np.int16) + 18)
-    water_mask = robust_mask(water_seed, close_radius=6)
+    water_mask = water_mask_from_true_color(folder, water_seed)
 
     for name, (sigma, alpha_level, domain) in CONFIG.items():
         path = folder / f"{name}.webp"

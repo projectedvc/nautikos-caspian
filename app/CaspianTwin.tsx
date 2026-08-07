@@ -72,7 +72,7 @@ type FilterDefinition = {
 const CASPIAN_BBOX: BBox = [46.0, 36.0, 55.8, 47.4];
 const REGIONAL_BASEMAP_BBOX: BBox = [25, 25, 75, 60];
 const YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
-const OVERVIEW_CACHE_VERSION = 21;
+const OVERVIEW_CACHE_VERSION = 22;
 const TIMELAPSE_CACHE_VERSION = 16;
 const MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 const WATER_FILTERS: ViewKey[] = ["optical", "waterOptical", "water", "oil", "chlorophyll", "suspendedMatter", "waterTemperature", "shoreline"];
@@ -366,7 +366,7 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
       type: "raster",
       source: "annual-filter-overview",
       maxzoom: 24,
-      paint: { "raster-opacity": 0.78, "raster-fade-duration": 0, "raster-resampling": "linear" },
+      paint: { "raster-opacity": 1, "raster-fade-duration": 0, "raster-resampling": "linear" },
     }, "place-labels");
 
   }
