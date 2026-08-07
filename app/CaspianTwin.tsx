@@ -335,7 +335,7 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
       maxzoom: 24,
       paint: {
         "raster-opacity": layer === "true-color"
-          ? ["interpolate", ["linear"], ["zoom"], 3, 0.96, 7, 0.88, 9, 0.28, 10, 0]
+          ? ["interpolate", ["linear"], ["zoom"], 3, 0.96, 5.8, 0.90, 6.5, 0.34, 7, 0]
           : 0.86,
         "raster-fade-duration": 0,
         "raster-resampling": "linear",
