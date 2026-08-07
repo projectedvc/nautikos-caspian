@@ -22,15 +22,15 @@ YEARS = range(2020, 2027)
 
 CONFIG = {
     "shoreline": (1.0, 215, "water"),
-    "water-quality": (5.5, 236, "water"),
-    "chlorophyll": (7.0, 236, "water"),
-    "suspended-matter": (8.0, 236, "water"),
-    "water-temperature": (24.0, 238, "water"),
-    "oil-roughness": (5.0, 236, "water"),
-    "vegetation": (4.0, 190, "land"),
-    "coast-moisture": (6.0, 190, "land"),
-    "soil-stress": (6.0, 190, "land"),
-    "erosion-risk": (5.0, 194, "land"),
+    "water-quality": (30.0, 246, "water"),
+    "chlorophyll": (34.0, 246, "water"),
+    "suspended-matter": (36.0, 246, "water"),
+    "water-temperature": (32.0, 246, "water"),
+    "oil-roughness": (28.0, 246, "water"),
+    "vegetation": (12.0, 212, "land"),
+    "coast-moisture": (14.0, 212, "land"),
+    "soil-stress": (14.0, 212, "land"),
+    "erosion-risk": (12.0, 216, "land"),
 }
 
 TARGET_WIDTH = 1536
@@ -154,11 +154,10 @@ def build_year(year: int) -> None:
         else:
             semantic = robust_mask(original & ~water_mask, close_radius=3)
 
-        # Keep the satellite photograph visible and strengthen only coloured anomalies.
-        colour_strength = np.clip(chroma.astype(np.float32) / 95.0, 0.0, 1.0)
-        alpha = semantic.astype(np.float32) * (
-            alpha_level * (0.55 + 0.45 * colour_strength)
-        )
+        # A constant semantic opacity prevents acquisition footprints in the
+        # RGB mosaic below from reappearing as rectangular artefacts.  The
+        # analytical variation remains encoded in the smoothed colour field.
+        alpha = semantic.astype(np.float32) * alpha_level
         feather = ndimage.gaussian_filter(semantic.astype(np.float32), sigma=1.15)
         alpha *= np.clip(feather, 0, 1)
 
