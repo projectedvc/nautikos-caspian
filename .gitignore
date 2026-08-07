@@ -48,3 +48,5 @@ next-env.d.ts
 /.runtime-nautikos*.log
 /scripts/.ee-map-urls.json
 /scripts/.ee-monthly-urls.json
+
+.env*

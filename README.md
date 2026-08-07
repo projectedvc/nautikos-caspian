@@ -1,44 +1,105 @@
-# Nautikos — Caspian environmental intelligence
+# Nautikos — экологический интеллект Каспия
 
-Nautikos is a working geospatial MVP for investigating environmental change in the Caspian Sea and its coastal corridor. It compares fixed annual observations from 2020–2026, runs water and coastal-land filters, plays a monthly archive as a timelapse, and analyses a user-selected area with a vision-capable AI assistant.
+[Рабочая версия](https://nautikos-caspian.vercel.app) · [Репозиторий](https://github.com/projectedvc/nautikos-caspian)
 
-The product is designed for a live jury demo: the historical Caspian dataset is stored on the application server, so map navigation and filter switching do not depend on a new Copernicus request every time.
+Nautikos — геоаналитическая платформа для мониторинга экологического состояния Каспийского моря и прибрежных территорий. Она объединяет локальный архив спутниковых продуктов за 2020–2026 годы, сравнение изменений, тематические экологические слои, инструменты измерения и ИИ-анализ выбранной области.
 
-## What the MVP does
+## Проблема
 
-- one-year view or synchronized before/after swipe comparison;
-- independent year selection with enforced chronological order;
-- fixed imagery per year: zooming never silently switches to another acquisition;
-- local low-resolution regional satellite backdrop plus detailed Caspian raster pyramid;
-- water workspace: true colour, Sentinel-3 water view, water extent, oil-slick candidates, chlorophyll, suspended matter, water temperature and shoreline;
-- coast workspace: shoreline, vegetation, moisture, soil stress and erosion risk;
-- AOI tools: visible selection, area estimate, water share estimate, GeoJSON export and optional AI analysis;
-- monthly 2020–2026 timelapse and a visual 2027 trend overlay;
-- light/dark themes and collapsible inspector.
+Данные наблюдения Земли доступны, но распределены между разными спутниками, каталогами и форматами. Для оценки состояния Каспия специалисту приходится вручную искать сопоставимые сцены, проверять облачность, рассчитывать индексы и только затем принимать решение о полевой проверке. Из-за этого возможные загрязнения, деградация берегов и изменение водной поверхности обнаруживаются поздно.
 
-## Scientific limits
+Nautikos превращает подготовленные спутниковые данные в единое рабочее пространство: показывает, где произошло изменение, каким экологическим сигналом оно подтверждается и что необходимо проверить на месте.
 
-Every thematic layer is a screening signal, not a laboratory diagnosis. Sentinel-2 provides 10/20 m native observations, Sentinel-3 OLCI about 300 m and temperature products about 1 km. “Oil slick” means a Sentinel-1 SAR roughness anomaly candidate which still needs cross-checking against wind, ships and field observations. Nautikos does not invent extra spatial detail when zooming beyond the source resolution.
+## Возможности MVP
 
-## Data architecture
+- просмотр фиксированных продуктов Каспия за 2020–2026 годы;
+- режим одного года и сравнение двух лет интерактивной шторкой;
+- независимый выбор раннего и позднего года с контролем хронологического порядка;
+- общий обзор всего моря и детальные тайлы при приближении;
+- отдельные рабочие наборы для воды и прибрежной суши;
+- выделение произвольной области без обязательного запуска ИИ;
+- расчёт площади участка и приблизительной доли водной поверхности;
+- экспорт выделения в GeoJSON;
+- помесячная хронология и визуальный тренд на 2027 год;
+- светлая и тёмная темы, скрываемая панель анализа.
 
-Runtime checks the local Caspian data directory first:
+Каждый год и каждый фильтр имеют собственный локальный обзор всего Каспия. На детальном масштабе платформа использует XYZ-тайлы того же продукта. Изменение масштаба не должно запускать поиск другой спутниковой сцены или незаметно переключать источник.
+
+## Экологические слои
+
+### Вода
+
+| Слой | Источник или метод | Назначение |
+|---|---|---|
+| Детальный снимок | Sentinel-2 MSI, RGB, 10 м | Визуальный контроль побережья и водной поверхности |
+| Спектральный снимок воды | Sentinel-3 OLCI, около 300 м | Обзор цвета воды и крупных водных процессов |
+| Шлейфы сбросов и мутность | Sentinel-2, NDWI и спектральная яркость | Поиск зон повышенной мутности и возможных сбросов |
+| Кандидаты утечки нефти | Sentinel-1 SAR, VV/VH | Скрининг аномально гладких участков поверхности |
+| Хлорофилл и цветение | Sentinel-3 OLCI | Поиск зон повышенной биологической активности |
+| Взвешенные вещества | Sentinel-3 OLCI | Наблюдение за осадком и крупными шлейфами |
+| Температура воды | Copernicus/ERA5-совместимый продукт | Выявление температурных аномалий |
+| Обмеление и берег | Sentinel-2, NDWI/MNDWI | Контроль изменения границы воды |
+
+### Береговая зона
+
+| Слой | Метод | Назначение |
+|---|---|---|
+| Растительность | NDVI | Оценка состояния растительного покрова |
+| Влажность берега | NDMI | Поиск пересыхающих и переувлажнённых участков |
+| Стресс почвы | BSI + NDVI | Приоритизация деградирующих территорий |
+| Риск эрозии | Рельеф и состояние покрова | Предварительная оценка уязвимости берега |
+
+Тематические продукты являются скрининговыми сигналами, а не лабораторным заключением. Например, тёмное пятно Sentinel-1 считается кандидатом нефтяного загрязнения только после проверки ветра, судовой активности, повторной съёмки и полевых данных.
+
+## Как платформа помогает Каспию
+
+Nautikos сокращает путь от спутникового снимка до практического решения. Платформа помогает раньше обнаруживать возможные загрязнения, отслеживать обмеление, находить участки деградации почвы и растительности, выбирать точки отбора проб и формировать приоритет выезда экологической группы. История 2020–2026 годов позволяет отличать устойчивый тренд от единичной сезонной аномалии.
+
+## ИИ-анализ
+
+Пользователь выделяет участок и сам выбирает действие: измерение, экспорт или анализ. Сервер формирует показатели области и передаёт ИИ структурированный контекст. ИИ объясняет обнаруженный сигнал, оценивает уровень риска и предлагает проверяемое следующее действие, например отбор пробы воды, повторное наблюдение Sentinel-1/2 или обследование береговой линии.
+
+ИИ не подтверждает загрязнение без полевой проверки и не добавляет несуществующую детализацию. Перспективное развитие — модель компьютерного зрения, которая будет получать фактический фрагмент выбранной области, сегментировать аномалии непосредственно на снимке и возвращать географическую маску с уровнем уверенности.
+
+## Архитектура
+
+```text
+Пользователь
+    │
+    ▼
+Vercel: Next.js + React + MapLibre
+    │
+    ├── статические обзоры 2020–2026 для мгновенного показа
+    │
+    └── /api/* → сервер Nautikos
+                    │
+                    ├── локальный тайловый куб Каспия
+                    ├── локальные метрики и помесячные кадры
+                    ├── ИИ-анализ Groq
+                    └── Copernicus API только как управляемый fallback
+```
+
+Основной режим работает с локально подготовленными данными и не запрашивает Copernicus при каждом перемещении карты. В Vercel хранится интерфейс и компактные обзоры; детальные тайлы, метрики и ИИ обслуживает отдельный сервер с локальным архивом.
+
+## Структура данных
 
 ```text
 cube/
   manifest.json
-  overviews/annual/{year}/{layer}.webp
-  overviews/monthly/{year}/{month}.webp
-  metrics/{year}.png
-  tiles/basemap/{z}/{x}/{y}.jpg
-  tiles/{layer}/{year}/{z}/{x}/{y}.webp
+  overviews/
+    annual/{year}/{layer}.webp
+    monthly/{year}/{month}.webp
+  metrics/annual/{year}.png
+  tiles/
+    basemap/{z}/{x}/{y}.jpg
+    {layer}/{year}/{z}/{x}/{y}.webp
 ```
 
-The local dataset contains only the Caspian and its surroundings, not a global archive. Scene identifiers and dates are recorded in the manifest for reproducibility.
+Архив ограничен Каспием и окружающей береговой зоной. Глобальные данные Земли не загружаются. В `manifest.json` фиксируются период, источник и доступные продукты.
 
-## Local setup
+## Быстрый запуск
 
-Requirements: Node.js 22.13+ and the prepared data cube.
+Требования: Node.js 22.13+, Python 3.11+, Pillow для публикации обзоров и подготовленный каталог `cube`.
 
 ```bash
 git clone https://github.com/projectedvc/nautikos-caspian.git
@@ -57,7 +118,7 @@ npm.cmd run build
 npm.cmd run start:windows
 ```
 
-Environment variables:
+Переменные окружения:
 
 ```env
 NAUTIKOS_DATA_DIR=/absolute/path/to/cube
@@ -66,49 +127,62 @@ GROQ_API_KEY=server-side-key
 CDSE_CLIENT_ID=optional-fallback-client-id
 CDSE_CLIENT_SECRET=optional-fallback-secret
 NAUTIKOS_CORS_ORIGIN=*
+NAUTIKOS_API_BASE_URL=https://your-imagery-server.example
 ```
 
-Secrets are server-only and `.env.local` is excluded from Git.
+Секреты используются только на сервере. Файлы `.env*` не должны попадать в Git.
 
-## Verification
+## Подготовка локальных данных
 
 ```bash
-npm run build
+npm run data:annual              # годовые продукты Sentinel-2
+npm run data:products            # экологические индексы и метрики
+npm run data:monthly             # помесячная хронология
+npm run data:tiles               # детальная локальная пирамида
+npm run data:basemap             # фон окружения Каспия
+npm run data:publish-overviews   # обзоры всех годов и фильтров для Vercel
+```
+
+## Проверка
+
+```bash
+npm test
 npm run build:vercel
 curl http://127.0.0.1:8765/health
 ```
 
-Expected health response:
+Ожидаемый ответ сервера:
 
 ```json
 {"status":"ok","service":"nautikos","dataMode":"local"}
 ```
 
-## Deployment
+Перед демонстрацией необходимо проверить минимум три сценария: смену годов в режиме шторки, применение водного и берегового фильтра на общем виде и после приближения, выделение области с расчётом и ИИ-анализом.
 
-The production layout separates a lightweight web frontend from the imagery server:
+## Развёртывание
 
-```text
-Browser → Vercel Next.js frontend → /api rewrite → Nautikos imagery server
-                                             └→ local Caspian data cube
-```
+1. Разместить каталог `cube` на сервере и указать `NAUTIKOS_DATA_DIR`.
+2. Запустить сервер Nautikos на порту 8765.
+3. Опубликовать сервер через постоянный HTTPS-домен.
+4. В Vercel установить `NAUTIKOS_API_BASE_URL` на этот домен.
+5. Выполнить `vercel deploy --prod`.
 
-Set `NAUTIKOS_API_BASE_URL` in Vercel to the public HTTPS address of the imagery server. `next.config.ts` keeps browser requests same-origin and forwards only `/api/*`.
+Временный Cloudflare Quick Tunnel подходит для демонстрации, но для постоянной эксплуатации требуется стабильный домен или Cloudflare Tunnel с закреплённым hostname.
 
-## Main commands
+## Дальнейшее развитие
 
-```bash
-npm run data:annual     # annual Caspian products
-npm run data:products   # derived environmental products
-npm run data:monthly    # 2020–2026 monthly frames
-npm run data:basemap    # regional z3–z8 satellite backdrop
-npm run data:tiles      # fixed detailed XYZ pyramid
-```
+- автоматические уведомления о новых аномалиях;
+- помесячное прогнозирование изменения береговой линии;
+- визуальная маска прогноза на карте, а не только текстовый ответ;
+- обучение сегментационной модели на подтверждённых нефтяных пятнах и полевых метках;
+- интеграция с дронами, метеоданными, буями и лабораторными пробами;
+- маршрутизация полевых групп и контроль выполнения проверок;
+- отчёты для государственных органов, экологов и промышленных предприятий.
 
-## Stack
+## Технологии
 
-Next.js 16, React 19, MapLibre GL, local XYZ/WebP/JPEG tiles, Copernicus Sentinel-1/2/3 products, CLMS/ERA5-compatible derived indicators and Groq vision analysis.
+Next.js 16, React 19, TypeScript, MapLibre GL, локальные WebP/JPEG/XYZ-продукты, Copernicus Sentinel-1/2/3, Groq и Python-инструменты подготовки геоданных.
 
-## License and attribution
+## Лицензирование и происхождение данных
 
-Application code is provided for the Caspian Hackathon MVP. Satellite products retain their original Copernicus/ESA terms. Keep scientific provenance in exported reports and field-verification workflows.
+Код подготовлен как MVP для Caspian Hackathon. Спутниковые продукты сохраняют условия использования Copernicus/ESA. При публикации отчётов необходимо сохранять сведения об источнике данных и обозначать необходимость полевой верификации скрининговых результатов.

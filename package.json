@@ -19,6 +19,7 @@
     "data:annual": "python scripts/build_local_caspian_cube.py --years all",
     "data:products": "python scripts/build_local_products.py",
     "data:monthly": "python scripts/build_monthly_overviews.py",
+    "data:publish-overviews": "python scripts/publish_local_overviews.py",
     "data:tiles": "node scripts/prewarm-earth-engine.mjs",
     "data:basemap": "node scripts/prewarm-regional-basemap.mjs",
     "build:vercel": "next build",

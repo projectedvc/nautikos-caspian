@@ -72,7 +72,7 @@ type FilterDefinition = {
 const CASPIAN_BBOX: BBox = [46.0, 36.0, 55.8, 47.4];
 const REGIONAL_BASEMAP_BBOX: BBox = [25, 25, 75, 60];
 const YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
-const OVERVIEW_CACHE_VERSION = 18;
+const OVERVIEW_CACHE_VERSION = 19;
 const TIMELAPSE_CACHE_VERSION = 16;
 const MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 const WATER_FILTERS: ViewKey[] = ["optical", "waterOptical", "water", "oil", "chlorophyll", "suspendedMatter", "waterTemperature", "shoreline"];
@@ -260,9 +260,7 @@ function baseStyle(): StyleSpecification {
 }
 
 function annualOverviewUrl(year: number, layer: LayerKey, version: number) {
-  if (layer === "true-color") return `/overviews/annual/${year}.webp?v=${version}-${OVERVIEW_CACHE_VERSION}`;
-  const size = "width=640&height=800";
-  return `/api/sentinel/process?year=${year}&layer=${layer}&bbox=${CASPIAN_BBOX.join(",")}&${size}&v=overview-${OVERVIEW_CACHE_VERSION}`;
+  return `/overviews/annual/${year}/${layer}.webp?v=${version}-${OVERVIEW_CACHE_VERSION}`;
 }
 
 function regionalBasemapTileUrl() {
@@ -326,13 +324,14 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
     // The whole-sea fallback is the already cached Sentinel-2 composite. A
     // full-Caspian OLCI mosaic is too expensive for an interactive request;
     // OLCI activates as fixed tiles from z6 without replacing the base scene.
-    url: annualOverviewUrl(year, "true-color", version),
+    url: annualOverviewUrl(year, detailPhotoLayer, version),
     coordinates,
   });
   map.addLayer({
     id: "annual-photo-overview",
     type: "raster",
     source: "annual-photo-overview",
+    maxzoom: 6,
     paint: { "raster-opacity": 1, "raster-fade-duration": 0, "raster-resampling": "linear" },
   }, "place-labels");
 
@@ -356,8 +355,7 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
     paint: { "raster-opacity": 1, "raster-fade-duration": 0, "raster-resampling": "linear" },
   }, "place-labels");
 
-  const overviewFilterAvailable = ["shoreline", "water-quality", "vegetation", "coast-moisture", "soil-stress"].includes(layer);
-  if (layer !== "true-color" && layer !== "olci-true-color" && overviewFilterAvailable) {
+  if (layer !== "true-color" && layer !== "olci-true-color") {
     map.addSource("annual-filter-overview", {
       type: "image",
       url: annualOverviewUrl(year, layer, version),
@@ -367,7 +365,8 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
       id: "annual-filter-overview",
       type: "raster",
       source: "annual-filter-overview",
-      paint: { "raster-opacity": 0.82, "raster-fade-duration": 0, "raster-resampling": "linear" },
+      maxzoom: 6,
+      paint: { "raster-opacity": 0.92, "raster-fade-duration": 0, "raster-resampling": "linear" },
     }, "place-labels");
 
   }
@@ -377,7 +376,7 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
       type: "raster",
       tiles: [annualTileUrl(year, layer, version)],
       tileSize: 512,
-      minzoom: 5,
+      minzoom: 6,
       maxzoom: nativeTileMaxZoom(layer),
       bounds: CASPIAN_BBOX,
     });
