@@ -61,6 +61,12 @@ def water_mask_from_true_color(folder: Path, fallback: np.ndarray) -> np.ndarray
     RGB colour itself and only the largest connected water body is retained.
     """
     rgb = np.asarray(Image.open(folder / "true-color.webp").convert("RGB"))
+    if fallback.shape != rgb.shape[:2]:
+        fallback = np.asarray(
+            Image.fromarray(fallback.astype(np.uint8) * 255).resize(
+                (rgb.shape[1], rgb.shape[0]), Image.Resampling.NEAREST
+            )
+        ) > 0
     r, g, b = [rgb[..., channel].astype(np.float32) for channel in range(3)]
     brightness = (r + g + b) / 3.0
     colour_seed = (
