@@ -22,11 +22,20 @@ import requests
 SEARCH_URL = "https://earth-search.aws.element84.com/v1/search"
 COLLECTION = "sentinel-2-l2a"
 BBOX = (46.0, 36.0, 55.8, 47.4)
-SEARCH_BBOXES = (
-    (46.0, 36.0, 55.8, 40.0),
-    (46.0, 40.0, 55.8, 44.0),
-    (46.0, 44.0, 55.8, 47.4),
-)
+SEARCH_STEP = 1.0
+
+
+def search_bboxes() -> list[tuple[float, float, float, float]]:
+    west, south, east, north = BBOX
+    boxes = []
+    y = south
+    while y < north:
+        x = west
+        while x < east:
+            boxes.append((x, y, min(x + SEARCH_STEP, east), min(y + SEARCH_STEP, north)))
+            x += SEARCH_STEP
+        y += SEARCH_STEP
+    return boxes
 ASSETS = ("visual", "blue", "green", "red", "nir", "scl")
 
 
@@ -44,7 +53,9 @@ def grid_id(feature: dict) -> str:
 
 def fetch_year(session: requests.Session, year: int, cloud: float) -> list[dict]:
     found: dict[str, dict] = {}
-    for search_bbox in SEARCH_BBOXES:
+    pending = search_bboxes()
+    while pending:
+        search_bbox = pending.pop(0)
         body = {
             "collections": [COLLECTION],
             "bbox": search_bbox,
@@ -55,12 +66,25 @@ def fetch_year(session: requests.Session, year: int, cloud: float) -> list[dict]
         url = SEARCH_URL
         while url:
             response = None
-            for attempt in range(5):
+            for attempt in range(7):
                 response = session.post(url, json=body, timeout=120)
                 if response.status_code < 500:
                     break
-                time.sleep(2**attempt)
+                time.sleep(min(2**attempt, 20))
             assert response is not None
+            if response.status_code >= 500:
+                west, south, east, north = search_bbox
+                if east - west > 0.3 and north - south > 0.3:
+                    mid_x = (west + east) / 2
+                    mid_y = (south + north) / 2
+                    pending[:0] = [
+                        (west, south, mid_x, mid_y),
+                        (mid_x, south, east, mid_y),
+                        (west, mid_y, mid_x, north),
+                        (mid_x, mid_y, east, north),
+                    ]
+                    print(f"{year}: split overloaded search cell {search_bbox}", flush=True)
+                    break
             response.raise_for_status()
             payload = response.json()
             for feature in payload.get("features", []):

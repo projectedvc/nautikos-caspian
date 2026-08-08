@@ -157,8 +157,11 @@ class CatalogRenderer:
     ) -> tuple[dict[str, np.ndarray], np.ndarray]:
         sums = {band: np.zeros((TILE_SIZE, TILE_SIZE), dtype=np.float64) for band in bands}
         counts = np.zeros((TILE_SIZE, TILE_SIZE), dtype=np.uint16)
-        def read_item(item: dict) -> dict[str, np.ma.MaskedArray]:
-            return {band: self._read_asset(item["assets"][band], bounds) for band in bands}
+        def read_item(item: dict) -> tuple[dict[str, np.ma.MaskedArray], np.ma.MaskedArray | None]:
+            arrays = {band: self._read_asset(item["assets"][band], bounds) for band in bands}
+            scl_asset = item.get("assets", {}).get("scl")
+            scl = self._read_asset(scl_asset, bounds, Resampling.nearest) if scl_asset else None
+            return arrays, scl
 
         # Low zoom tiles can intersect most of the Caspian scene grid. Opening
         # independent COG ranges concurrently removes request latency while the
@@ -167,10 +170,21 @@ class CatalogRenderer:
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="nautikos-cog") as pool:
             futures = [pool.submit(read_item, item) for item in items]
             for future in as_completed(futures):
-                arrays = future.result()
+                arrays, scl = future.result()
                 valid = np.ones((TILE_SIZE, TILE_SIZE), dtype=bool)
                 for array in arrays.values():
                     valid &= ~np.ma.getmaskarray(array)
+                # Sentinel-2 COGs use an all-zero pixel outside the real
+                # detector footprint even when nodata is absent from metadata.
+                # Mask the combined pixel, not individual zero-valued bands,
+                # so genuinely dark water remains visible.
+                valid &= np.any(np.stack([array.data > 0 for array in arrays.values()]), axis=0)
+                if scl is not None:
+                    # Exclude no-data, saturated pixels, cloud shadow, cloud,
+                    # cirrus and snow.  This keeps every yearly product tied to
+                    # real pixels while removing the rectangular cloud masks.
+                    bad_scl = np.isin(scl.data.astype(np.uint8), (0, 1, 3, 8, 9, 10, 11))
+                    valid &= ~np.ma.getmaskarray(scl) & ~bad_scl
                 if not np.any(valid):
                     continue
                 counts[valid] += 1
