@@ -74,8 +74,8 @@ const CASPIAN_BBOX: BBox = [46.0, 36.0, 55.8, 47.4];
 const REGIONAL_BASEMAP_BBOX: BBox = [25, 25, 75, 60];
 const YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
 const DATA_API_BASE = (process.env.NEXT_PUBLIC_NAUTIKOS_DATA_URL ?? "").replace(/\/$/, "");
-const WATER_FILTERS: ViewKey[] = ["optical", "waterOptical", "water", "oil", "chlorophyll", "suspendedMatter", "waterTemperature", "shoreline"];
-const LAND_FILTERS: ViewKey[] = ["optical", "shoreline", "vegetation", "coastMoisture", "soil", "erosion"];
+const WATER_FILTERS: ViewKey[] = ["optical", "waterOptical", "water", "suspendedMatter", "shoreline"];
+const LAND_FILTERS: ViewKey[] = ["optical", "shoreline", "vegetation", "soil"];
 const PRODUCT_BY_LAYER: Record<LayerKey, string> = {
   "true-color": "rgb",
   "olci-true-color": "water_colour",
@@ -108,7 +108,7 @@ const regions: Region[] = [
   { id: "tm", name: "Побережье Туркменистана", bbox: [51.8, 36.8, 55.5, 42.5] },
 ];
 
-const filters: FilterDefinition[] = [
+const allFilters: FilterDefinition[] = [
   {
     id: "optical",
     label: "Снимок и граница воды",
@@ -230,6 +230,51 @@ const filters: FilterDefinition[] = [
     explanation: "SAR выделяет тёмные формации на воде при облаках и ночью. Для тревоги кандидат проверяется по ветру, AIS и повторному пролёту.",
   },
 ];
+
+// The MVP exposes only layers that are backed by the fixed Sentinel-2 L3
+// scene set on the Jupyter server. Unsupported thermal/SAR/OLCI claims are not
+// shown as buttons until their independent products are ingested.
+const SUPPORTED_FILTERS = new Set<ViewKey>(["optical", "waterOptical", "shoreline", "water", "suspendedMatter", "vegetation", "soil"]);
+const FILTER_COPY: Partial<Record<ViewKey, Pick<FilterDefinition, "label" | "subtitle" | "explanation">>> = {
+  optical: {
+    label: "Реальный снимок Каспия",
+    subtitle: "Sentinel‑2 L3 · единый Q1 · 10 м",
+    explanation: "Реальная квартальная мозаика Sentinel‑2 из Copernicus Data Space. Для всех лет используется один период и одна сетка, поэтому шторка сравнивает 2020–2026 без подмены кадра при приближении.",
+  },
+  waterOptical: {
+    label: "Оптическая поверхность воды",
+    subtitle: "Sentinel‑2 L3 · RGB + NDWI · 10 м",
+    explanation: "Исходные RGB‑пиксели показаны только внутри спектральной маски воды. Слой помогает рассматривать цвет воды, речные шлейфы и прибрежные изменения без окрашивания суши.",
+  },
+  shoreline: {
+    label: "Граница воды и обмеление",
+    subtitle: "Sentinel‑2 L3 · NDWI · 10 м",
+    explanation: "Контур рассчитан из зелёного и ближнего инфракрасного каналов того же годового кадра. Жёлтая кромка показывает измеренную границу воды, а шторка — её смещение между годами.",
+  },
+  water: {
+    label: "Мутность и шлейфы сбросов",
+    subtitle: "Sentinel‑2 L3 · NDTI‑скрининг · 10 м",
+    explanation: "Индекс красного и зелёного отражения применяется только внутри маски воды. Тёплые зоны — кандидаты на взвесь или речной/техногенный шлейф, которые требуют проверки повторным снимком и пробой воды.",
+  },
+  suspendedMatter: {
+    label: "Взвесь в воде",
+    subtitle: "Sentinel‑2 L3 · Red/Green · 10 м",
+    explanation: "Относительный сигнал взвешенного вещества рассчитан из согласованных красного и зелёного каналов. Это сравнительный приоритет для обследования, а не лабораторная концентрация.",
+  },
+  vegetation: {
+    label: "Растительность побережья",
+    subtitle: "Sentinel‑2 L3 · NDVI · 10 м",
+    explanation: "NDVI показывает потерю и восстановление растительного покрова вокруг Каспия на одинаковой сетке 2020–2026.",
+  },
+  soil: {
+    label: "Оголение и стресс почвы",
+    subtitle: "Sentinel‑2 L3 · Visible/NIR · 10 м",
+    explanation: "Слой выделяет сушу со слабым растительным сигналом как кандидата на деградацию. Для диагноза засоления или загрязнения нужна полевая проба.",
+  },
+};
+const filters: FilterDefinition[] = allFilters
+  .filter((item) => SUPPORTED_FILTERS.has(item.id))
+  .map((item) => ({ ...item, ...(FILTER_COPY[item.id] ?? {}) }));
 
 function bboxPolygon(bbox: BBox) {
   const [west, south, east, north] = bbox;
@@ -873,7 +918,7 @@ export default function CaspianTwin() {
           <div className="filter-list grouped">
             {visibleFilters.map((item, index) => {
               const Icon = item.icon;
-              const showGroupTitle = index === 0 || (sidebarSection === "water" && index === 4) || (sidebarSection === "land" && index === 1);
+              const showGroupTitle = index === 0 || (sidebarSection === "water" && index === 2) || (sidebarSection === "land" && index === 1);
               const groupTitle = index === 0 ? (sidebarSection === "water" ? "СНИМКИ И РАДАР ВОДЫ" : "ИСХОДНЫЙ СНИМОК") : "ЭКОЛОГИЧЕСКИЕ ПОКАЗАТЕЛИ";
               return <div className="filter-entry" key={item.id}>{showGroupTitle && <span className="filter-group-title">{groupTitle}</span>}<button className={item.id === activeView ? "active" : ""} onClick={() => selectFilter(item.id)}><span className="filter-icon"><Icon size={17} /></span><span><strong>{item.label}</strong><small>{item.subtitle}</small></span></button></div>;
             })}
