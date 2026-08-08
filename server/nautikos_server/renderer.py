@@ -76,7 +76,10 @@ class CatalogRenderer:
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.catalog_root = settings.nautikos_data_root / "catalog" / "sentinel-2-l3-quarterly"
+        self.catalog_roots = (
+            settings.nautikos_data_root / "catalog" / "sentinel-2-earth-search",
+            settings.nautikos_data_root / "catalog" / "sentinel-2-l3-quarterly",
+        )
         self.cache_root = settings.nautikos_data_root / "tiles"
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
@@ -91,10 +94,11 @@ class CatalogRenderer:
 
     @lru_cache(maxsize=14)
     def catalog(self, year: int) -> dict:
-        path = self.catalog_root / f"{year}.json"
-        if not path.is_file():
-            raise FileNotFoundError(f"catalog is not built for {year}")
-        return json.loads(path.read_text(encoding="utf-8"))
+        for root in self.catalog_roots:
+            path = root / f"{year}.json"
+            if path.is_file():
+                return json.loads(path.read_text(encoding="utf-8"))
+        raise FileNotFoundError(f"catalog is not built for {year}")
 
     def cache_path(self, product: str, year: int, z: int, x: int, y: int) -> Path:
         return self.cache_root / product / str(year) / str(z) / str(x) / f"{y}.png"
@@ -116,7 +120,9 @@ class CatalogRenderer:
         bounds: tuple[float, float, float, float],
         resampling: Resampling = Resampling.bilinear,
     ) -> np.ma.MaskedArray:
-        url = self.signed_url(asset["bucket"], asset["key"])
+        url = asset.get("href")
+        if not url or url.startswith("s3://"):
+            url = self.signed_url(asset["bucket"], asset["key"])
         transform = from_bounds(*bounds, TILE_SIZE, TILE_SIZE)
         env = {
             "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
@@ -136,7 +142,7 @@ class CatalogRenderer:
                     resampling=resampling,
                     src_nodata=source.nodata,
                 ) as vrt:
-                    data = vrt.read(1, masked=True, out_dtype="float32")
+                    data = vrt.read(int(asset.get("band", 1)), masked=True, out_dtype="float32")
         mask = np.ma.getmaskarray(data) | ~np.isfinite(data.filled(np.nan))
         mask |= data.filled(-32768) <= -32000
         return np.ma.array(data.filled(0), mask=mask)
@@ -179,6 +185,15 @@ class CatalogRenderer:
         nir = arrays.get("B08")
         if product == "rgb":
             alpha = valid.astype(np.uint8) * 255
+            if "TCI_R" in arrays:
+                return np.dstack(
+                    [
+                        np.clip(arrays["TCI_R"], 0, 255).astype(np.uint8),
+                        np.clip(arrays["TCI_G"], 0, 255).astype(np.uint8),
+                        np.clip(arrays["TCI_B"], 0, 255).astype(np.uint8),
+                        alpha,
+                    ]
+                )
             return np.dstack([stretch(red), stretch(green), stretch(blue), alpha])
 
         epsilon = 1e-6
@@ -233,7 +248,9 @@ class CatalogRenderer:
             items = [item for item in catalog["items"] if item.get("bbox") and intersects(item["bbox"], geographic)]
             if not items:
                 raise FileNotFoundError("tile does not intersect the fixed scene set")
-            if product == "rgb":
+            if product == "rgb" and all("TCI_R" in item["assets"] for item in items):
+                bands = ("TCI_R", "TCI_G", "TCI_B")
+            elif product == "rgb":
                 bands = ("B04", "B03", "B02")
             elif product in {"water_colour"}:
                 bands = ("B04", "B03", "B02", "B08")
