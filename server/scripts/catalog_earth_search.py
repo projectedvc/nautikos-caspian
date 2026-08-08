@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,11 @@ import requests
 SEARCH_URL = "https://earth-search.aws.element84.com/v1/search"
 COLLECTION = "sentinel-2-l2a"
 BBOX = (46.0, 36.0, 55.8, 47.4)
+SEARCH_BBOXES = (
+    (46.0, 36.0, 55.8, 40.0),
+    (46.0, 40.0, 55.8, 44.0),
+    (46.0, 44.0, 55.8, 47.4),
+)
 ASSETS = ("visual", "blue", "green", "red", "nir", "scl")
 
 
@@ -37,29 +43,36 @@ def grid_id(feature: dict) -> str:
 
 
 def fetch_year(session: requests.Session, year: int, cloud: float) -> list[dict]:
-    body = {
-        "collections": [COLLECTION],
-        "bbox": BBOX,
-        "datetime": f"{year}-01-01T00:00:00Z/{year}-03-31T23:59:59Z",
-        "limit": 1000,
-        "query": {"eo:cloud_cover": {"lt": cloud}},
-        "sortby": [{"field": "properties.eo:cloud_cover", "direction": "asc"}],
-    }
-    features: list[dict] = []
-    url = SEARCH_URL
-    while url:
-        response = session.post(url, json=body, timeout=120)
-        response.raise_for_status()
-        payload = response.json()
-        features.extend(payload.get("features", []))
-        next_link = next((link for link in payload.get("links", []) if link.get("rel") == "next"), None)
-        if not next_link:
-            break
-        url = next_link["href"]
-        body = next_link.get("body", body)
-        if len(features) >= 5000:
-            raise RuntimeError("Earth Search pagination safety limit reached")
-    return features
+    found: dict[str, dict] = {}
+    for search_bbox in SEARCH_BBOXES:
+        body = {
+            "collections": [COLLECTION],
+            "bbox": search_bbox,
+            "datetime": f"{year}-01-01T00:00:00Z/{year}-03-31T23:59:59Z",
+            "limit": 1000,
+            "query": {"eo:cloud_cover": {"lt": cloud}},
+        }
+        url = SEARCH_URL
+        while url:
+            response = None
+            for attempt in range(5):
+                response = session.post(url, json=body, timeout=120)
+                if response.status_code < 500:
+                    break
+                time.sleep(2**attempt)
+            assert response is not None
+            response.raise_for_status()
+            payload = response.json()
+            for feature in payload.get("features", []):
+                found[feature["id"]] = feature
+            next_link = next((link for link in payload.get("links", []) if link.get("rel") == "next"), None)
+            if not next_link:
+                break
+            url = next_link["href"]
+            body = next_link.get("body", body)
+            if len(found) >= 8000:
+                raise RuntimeError("Earth Search pagination safety limit reached")
+    return list(found.values())
 
 
 def main() -> None:
