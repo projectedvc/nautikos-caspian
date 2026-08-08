@@ -105,8 +105,12 @@ cube/
 git clone https://github.com/projectedvc/nautikos-caspian.git
 cd nautikos-caspian
 npm ci
+python -m venv server/.venv
+server/.venv/bin/pip install -r server/requirements.txt
 cp .env.example .env.local
 npm run build
+server/.venv/bin/uvicorn --app-dir server run:app --host 0.0.0.0 --port 8787
+# в другом терминале
 HOST=0.0.0.0 PORT=8765 npm run start:server
 ```
 
@@ -115,24 +119,40 @@ Windows:
 ```powershell
 npm.cmd ci
 npm.cmd run build
+server\.venv\Scripts\python.exe -m pip install -r server\requirements.txt
+server\.venv\Scripts\python.exe -m uvicorn --app-dir server run:app --host 0.0.0.0 --port 8787
 npm.cmd run start:windows
 ```
 
 Переменные окружения:
 
 ```env
-NAUTIKOS_DATA_DIR=/absolute/path/to/cube
-CASPIAN_CACHE_DIR=/absolute/path/to/cache
+NAUTIKOS_DATA_ROOT=/home/jovyan/work/caspiansea/data-v2
 GROQ_API_KEY=server-side-key
-CDSE_CLIENT_ID=optional-fallback-client-id
-CDSE_CLIENT_SECRET=optional-fallback-secret
-NAUTIKOS_CORS_ORIGIN=*
+NAUTIKOS_ALLOWED_ORIGINS=https://nautikos-caspian.vercel.app
+CDSE_S3_ACCESS_KEY=optional-fallback-access-key
+CDSE_S3_SECRET_KEY=optional-fallback-secret-key
 NAUTIKOS_API_BASE_URL=https://your-imagery-server.example
+NEXT_PUBLIC_NAUTIKOS_DATA_URL=https://your-imagery-server.example
 ```
 
 Секреты используются только на сервере. Файлы `.env*` не должны попадать в Git.
 
 ## Подготовка локальных данных
+
+В репозитории уже зафиксированы отдельные каталоги Sentinel-2 L2A для каждого года 2020–2026. Для каждого MGRS-сектора выбран наименее облачный кадр первого квартала; каталог года содержит 148–149 реальных сцен и уникальный `scene_set_id`. Поэтому переключение года меняет источник данных, а масштабирование использует тот же набор сцен и не подменяет изображение другой картой.
+
+Первый запрос к детальному тайлу строит его из Cloud Optimized GeoTIFF и сохраняет в `NAUTIKOS_DATA_ROOT/tiles-v3`. Повторные запросы обслуживаются из локального неизменяемого кэша. Чтобы сервер постепенно перестал обращаться к внешнему архиву даже при построении новых тайлов, запустите полную локализацию выбранного архива:
+
+```bash
+python server/scripts/download_earth_search.py \
+  --years 2020:2026 \
+  --catalog-root server/seed-data/catalog/sentinel-2-earth-search \
+  --data-root /home/jovyan/work/caspiansea/data-v2 \
+  --workers 3
+```
+
+Загрузчик поддерживает продолжение `.part`-файлов и дедупликацию URL. Он сохраняет только выбранные сцены вокруг Каспия и необходимые каналы `visual`, `B02`, `B03`, `B04`, `B08`, `SCL`; глобальный архив Земли не скачивается. Полный набор занимает ориентировочно 0,6–1,2 ТБ в зависимости от фактического сжатия COG. Для демонстрационного режима достаточно кэша обзорных уровней, обычно 2–10 ГБ.
 
 ```bash
 npm run data:annual              # годовые продукты Sentinel-2
@@ -148,13 +168,13 @@ npm run data:publish-overviews   # обзоры всех годов и филь�
 ```bash
 npm test
 npm run build:vercel
-curl http://127.0.0.1:8765/health
+curl http://127.0.0.1:8787/health
 ```
 
 Ожидаемый ответ сервера:
 
 ```json
-{"status":"ok","service":"nautikos","dataMode":"local"}
+{"status":"ok","service":"nautikos-data","version":"2.0.0"}
 ```
 
 Перед демонстрацией необходимо проверить минимум три сценария: смену годов в режиме шторки, применение водного и берегового фильтра на общем виде и после приближения, выделение области с расчётом и ИИ-анализом.
@@ -162,9 +182,9 @@ curl http://127.0.0.1:8765/health
 ## Развёртывание
 
 1. Разместить каталог `cube` на сервере и указать `NAUTIKOS_DATA_DIR`.
-2. Запустить сервер Nautikos на порту 8765.
+2. Запустить API спутниковых данных Nautikos на порту 8787.
 3. Опубликовать сервер через постоянный HTTPS-домен.
-4. В Vercel установить `NAUTIKOS_API_BASE_URL` на этот домен.
+4. В Vercel установить `NAUTIKOS_API_BASE_URL` и `NEXT_PUBLIC_NAUTIKOS_DATA_URL` на этот домен.
 5. Выполнить `vercel deploy --prod`.
 
 Временный Cloudflare Quick Tunnel подходит для демонстрации, но для постоянной эксплуатации требуется стабильный домен или Cloudflare Tunnel с закреплённым hostname.
