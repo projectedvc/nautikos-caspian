@@ -22,8 +22,8 @@ test("server-renders the Nautikos Caspian workspace", async () => {
   assert.match(html, /<html lang="ru">/i);
   assert.match(html, /<title>Nautikos — экологическая разведка Каспия<\/title>/i);
   assert.match(html, /Экологический интеллект Каспия/);
-  assert.match(html, /Вода: спектральный снимок/);
-  assert.match(html, /Кандидаты утечки нефти/);
+  assert.match(html, /Реальный снимок Каспия/);
+  assert.match(html, /Мутность и шлейфы сбросов/);
   assert.match(html, /2020/);
   assert.match(html, /2026/);
   assert.doesNotMatch(html, /Your site is taking shape|Building your site/);
