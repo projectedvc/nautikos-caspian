@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 import boto3
 import numpy as np
@@ -116,15 +118,21 @@ class CatalogRenderer:
             ExpiresIn=21600,
         )
 
+    def _asset_url(self, asset: dict) -> str:
+        url = asset.get("href")
+        if not url or url.startswith("s3://"):
+            return self.signed_url(asset["bucket"], asset["key"])
+        suffix = Path(urlparse(url).path).suffix or ".tif"
+        local = self.settings.nautikos_data_root / "raw" / "earth-search" / "assets" / f"{hashlib.sha256(url.encode()).hexdigest()}{suffix}"
+        return str(local) if local.is_file() else url
+
     def _read_asset(
         self,
         asset: dict,
         bounds: tuple[float, float, float, float],
         resampling: Resampling = Resampling.bilinear,
     ) -> np.ma.MaskedArray:
-        url = asset.get("href")
-        if not url or url.startswith("s3://"):
-            url = self.signed_url(asset["bucket"], asset["key"])
+        url = self._asset_url(asset)
         transform = from_bounds(*bounds, TILE_SIZE, TILE_SIZE)
         env = {
             "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
@@ -149,6 +157,41 @@ class CatalogRenderer:
         mask |= data.filled(-32768) <= -32000
         return np.ma.array(data.filled(0), mask=mask)
 
+    def _read_asset_bands(
+        self,
+        asset: dict,
+        indexes: list[int],
+        bounds: tuple[float, float, float, float],
+    ) -> list[np.ma.MaskedArray]:
+        """Read several bands from one COG with a single remote open."""
+        url = self._asset_url(asset)
+        transform = from_bounds(*bounds, TILE_SIZE, TILE_SIZE)
+        env = {
+            "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
+            "GDAL_HTTP_MERGE_CONSECUTIVE_RANGES": "YES",
+            "GDAL_HTTP_MULTIPLEX": "YES",
+            "VSI_CACHE": "TRUE",
+            "VSI_CACHE_SIZE": 16 * 1024 * 1024,
+        }
+        with rasterio.Env(**env):
+            with rasterio.open(url) as source:
+                with WarpedVRT(
+                    source,
+                    crs="EPSG:3857",
+                    transform=transform,
+                    width=TILE_SIZE,
+                    height=TILE_SIZE,
+                    resampling=Resampling.bilinear,
+                    src_nodata=source.nodata,
+                ) as vrt:
+                    stack = vrt.read(indexes, masked=True, out_dtype="float32")
+        arrays = []
+        for data in stack:
+            mask = np.ma.getmaskarray(data) | ~np.isfinite(data.filled(np.nan))
+            mask |= data.filled(-32768) <= -32000
+            arrays.append(np.ma.array(data.filled(0), mask=mask))
+        return arrays
+
     def _mosaic(
         self,
         items: list[dict],
@@ -158,7 +201,17 @@ class CatalogRenderer:
         sums = {band: np.zeros((TILE_SIZE, TILE_SIZE), dtype=np.float64) for band in bands}
         counts = np.zeros((TILE_SIZE, TILE_SIZE), dtype=np.uint16)
         def read_item(item: dict) -> tuple[dict[str, np.ma.MaskedArray], np.ma.MaskedArray | None]:
-            arrays = {band: self._read_asset(item["assets"][band], bounds) for band in bands}
+            arrays: dict[str, np.ma.MaskedArray] = {}
+            grouped: dict[tuple[str, str, str], list[tuple[str, int, dict]]] = {}
+            for band in bands:
+                asset = item["assets"][band]
+                identity = (asset.get("href", ""), asset.get("bucket", ""), asset.get("key", ""))
+                grouped.setdefault(identity, []).append((band, int(asset.get("band", 1)), asset))
+            for entries in grouped.values():
+                names = [entry[0] for entry in entries]
+                indexes = [entry[1] for entry in entries]
+                values = self._read_asset_bands(entries[0][2], indexes, bounds)
+                arrays.update(zip(names, values))
             scl_asset = item.get("assets", {}).get("scl")
             scl = self._read_asset(scl_asset, bounds, Resampling.nearest) if scl_asset else None
             return arrays, scl
