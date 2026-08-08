@@ -350,6 +350,15 @@ function annualTileUrl(year: number, layer: LayerKey, version: number) {
   return `${DATA_API_BASE}/v2/tiles/${PRODUCT_BY_LAYER[layer]}/${year}/{z}/{x}/{y}.png?v=${version}`;
 }
 
+function annualOverviewUrl(year: number, layer: LayerKey, version: number) {
+  return `/overviews/annual/${year}/${layer}.webp?v=${version}`;
+}
+
+function overviewCoordinates(): [[number, number], [number, number], [number, number], [number, number]] {
+  const [west, south, east, north] = CASPIAN_BBOX;
+  return [[west, north], [east, north], [east, south], [west, south]];
+}
+
 function productPeriod(year: number, layer: LayerKey) {
   if (["true-color", "shoreline", "vegetation"].includes(layer)) return `Sentinel-2 L3 · Q1 ${year} · 10/20 м`;
   if (layer === "erosion-risk") return "статический рельеф";
@@ -365,11 +374,25 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
     if (map.getSource(id)) map.removeSource(id);
   }
 
+  map.addSource("annual-photo-overview", {
+    type: "image",
+    url: annualOverviewUrl(year, "true-color", version),
+    coordinates: overviewCoordinates(),
+  });
+  map.addLayer({
+    id: "annual-photo-overview",
+    type: "raster",
+    source: "annual-photo-overview",
+    minzoom: 3,
+    maxzoom: 8,
+    paint: { "raster-opacity": 1, "raster-fade-duration": 0, "raster-resampling": "linear" },
+  }, "place-labels");
+
   map.addSource("annual-photo-tiles", {
     type: "raster",
     tiles: [annualTileUrl(year, "true-color", version)],
     tileSize: 256,
-    minzoom: 3,
+    minzoom: 6,
     maxzoom: 14,
     bounds: CASPIAN_BBOX,
   });
@@ -377,7 +400,7 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
     id: "annual-photo-tiles",
     type: "raster",
     source: "annual-photo-tiles",
-    minzoom: 3,
+    minzoom: 6,
     paint: {
       "raster-opacity": 1,
       "raster-fade-duration": 0,
@@ -386,11 +409,28 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
   }, "place-labels");
 
   if (layer !== "true-color") {
+    map.addSource("annual-filter-overview", {
+      type: "image",
+      url: annualOverviewUrl(year, layer, version),
+      coordinates: overviewCoordinates(),
+    });
+    map.addLayer({
+      id: "annual-filter-overview",
+      type: "raster",
+      source: "annual-filter-overview",
+      minzoom: 3,
+      maxzoom: 8,
+      paint: {
+        "raster-opacity": layer === "shoreline" ? 0.92 : 0.72,
+        "raster-fade-duration": 0,
+        "raster-resampling": "linear",
+      },
+    }, "place-labels");
     map.addSource("annual-filter-tiles", {
       type: "raster",
       tiles: [annualTileUrl(year, layer, version)],
       tileSize: 256,
-      minzoom: 3,
+      minzoom: 6,
       maxzoom: layer === "olci-true-color" || layer === "chlorophyll" || layer === "suspended-matter" ? 11 : 14,
       bounds: CASPIAN_BBOX,
     });
@@ -398,6 +438,7 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
       id: "annual-filter-tiles",
       type: "raster",
       source: "annual-filter-tiles",
+      minzoom: 6,
       paint: {
         "raster-opacity": layer === "shoreline" ? 0.92 : 0.72,
         "raster-fade-duration": 0,

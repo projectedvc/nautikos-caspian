@@ -14,11 +14,19 @@ function optionalInteger(url: URL, name: string) {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   if (DATA_BACKEND) {
-    const target = new URL(`${url.pathname}${url.search}`, `${DATA_BACKEND}/`);
-    const response = await fetch(target, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
-    const headers = new Headers(response.headers);
-    headers.set("x-nautikos-gateway", "JUPYTER-DATA-BACKEND");
-    return new Response(response.body, { status: response.status, headers });
+    try {
+      const target = new URL(`${url.pathname}${url.search}`, `${DATA_BACKEND}/`);
+      const response = await fetch(target, { cache: "no-store", signal: AbortSignal.timeout(4_000) });
+      if (response.ok) {
+        const headers = new Headers(response.headers);
+        headers.set("x-nautikos-gateway", "JUPYTER-DATA-BACKEND");
+        return new Response(response.body, { status: response.status, headers });
+      }
+    } catch {
+      // A sleeping or unavailable data server must not blank the map.  The
+      // public regional imagery below is the visual fallback while verified
+      // Sentinel products continue to load independently.
+    }
   }
   const z = optionalInteger(url, "z");
   const x = optionalInteger(url, "x");
