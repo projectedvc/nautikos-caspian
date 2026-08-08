@@ -1,0 +1,16 @@
+# Server-side raster data and local development artefacts are never part of
+# the Vercel frontend bundle. They live on the Jupyter data origin.
+data/
+public/tiles/
+tile-*.png
+.codex-dev-*.log
+.codex-dev-*.err.log
+scripts/build_real_sentinel2_mosaics.py
+scripts/cache_cloudless_pyramid.py
+scripts/harmonize_real_sentinel2_mosaics.py
+
+# Vercel builds these directories itself.
+.next/
+.vinext/
+node_modules/
+server/.venv/
