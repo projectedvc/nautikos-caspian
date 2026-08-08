@@ -94,8 +94,8 @@ export async function POST(request: Request) {
     const vegetation = regression(series.map((point) => ({ year: point.year, value: point.vegetation })), -1, 1);
     const soilStress = regression(series.map((point) => ({ year: point.year, value: point.soilStress })), 0, 1);
     const result = {
-      source: "Nautikos fixed Sentinel‑2 Q1 analysis cube",
-      method: "Сопоставимые квартальные продукты Q1 2020–2026; расчёт только по пикселям выбранной области",
+      source: "Nautikos fixed Sentinel‑2 July analysis cube",
+      method: "Сопоставимые июльские продукты 2020–2026; расчёт только по пикселям выбранной области",
       resolutionDegrees: 0.022,
       series,
       forecast: { year: 2027, waterShare: water.value, vegetation: vegetation.value, soilStress: soilStress.value },

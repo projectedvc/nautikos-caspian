@@ -2,7 +2,7 @@
   "schema": 2,
   "comparison": {
     "years": [2020, 2021, 2022, 2023, 2024, 2025, 2026],
-    "quarter": 1,
+    "month": 7,
     "display_crs": "EPSG:3857",
     "analysis_crs": "EPSG:6933",
     "bbox_wgs84": [46.0, 36.0, 55.8, 47.4]

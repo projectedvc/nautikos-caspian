@@ -2,8 +2,9 @@
 """Build fixed annual Sentinel-2 L2A catalogues from the public AWS archive.
 
 Earth Search exposes the same ESA Sentinel-2 observations as public COGs. The
-catalogue chooses one least-cloudy Q1 acquisition for every MGRS grid cell so
-each year is real, reproducible and independent from runtime API credentials.
+catalogue keeps several least-cloudy July acquisitions for every MGRS grid
+cell. Multiple observations fill cloud and detector gaps, while the fixed
+season keeps comparisons from 2020 through 2026 reproducible.
 """
 
 from __future__ import annotations
@@ -22,7 +23,10 @@ import requests
 SEARCH_URL = "https://earth-search.aws.element84.com/v1/search"
 COLLECTION = "sentinel-2-l2a"
 BBOX = (46.0, 36.0, 55.8, 47.4)
-SEARCH_STEP = 1.0
+# Two-degree search cells stay well below the STAC page limit for one July
+# while reducing catalogue construction from hundreds of requests per year to
+# a few dozen. The returned items are de-duplicated by STAC id below.
+SEARCH_STEP = 2.0
 
 
 def search_bboxes() -> list[tuple[float, float, float, float]]:
@@ -36,7 +40,7 @@ def search_bboxes() -> list[tuple[float, float, float, float]]:
             x += SEARCH_STEP
         y += SEARCH_STEP
     return boxes
-ASSETS = ("visual", "blue", "green", "red", "nir", "scl")
+ASSETS = ("blue", "green", "red", "nir", "scl")
 
 
 def years(value: str) -> list[int]:
@@ -59,7 +63,7 @@ def fetch_year(session: requests.Session, year: int, cloud: float) -> list[dict]
         body = {
             "collections": [COLLECTION],
             "bbox": search_bbox,
-            "datetime": f"{year}-01-01T00:00:00Z/{year}-03-31T23:59:59Z",
+            "datetime": f"{year}-07-01T00:00:00Z/{year}-07-31T23:59:59Z",
             "limit": 1000,
             "query": {"eo:cloud_cover": {"lt": cloud}},
         }
@@ -103,6 +107,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--years", type=years, default=years("2020:2026"))
     parser.add_argument("--cloud", type=float, default=35.0)
+    parser.add_argument("--scenes-per-grid", type=int, default=3)
     parser.add_argument("--output-root", type=Path, default=Path("/home/jovyan/work/caspiansea/data-v2"))
     args = parser.parse_args()
     output = args.output_root / "catalog" / "sentinel-2-earth-search"
@@ -115,17 +120,19 @@ def main() -> None:
         for feature in candidates:
             if all(name in feature.get("assets", {}) for name in ASSETS):
                 grouped[grid_id(feature)].append(feature)
-        selected = [min(group, key=lambda item: float(item["properties"].get("eo:cloud_cover", 100))) for group in grouped.values()]
-        selected.sort(key=lambda item: grid_id(item))
+        selected = [
+            item
+            for group in grouped.values()
+            for item in sorted(group, key=lambda candidate: float(candidate["properties"].get("eo:cloud_cover", 100)))[
+                : max(1, args.scenes_per_grid)
+            ]
+        ]
+        selected.sort(key=lambda item: (grid_id(item), item["properties"].get("datetime", "")))
         records = []
         for item in selected:
             assets = {name: {"href": item["assets"][name]["href"]} for name in ASSETS}
-            visual = assets["visual"]
             assets.update(
                 {
-                    "TCI_R": {**visual, "band": 1},
-                    "TCI_G": {**visual, "band": 2},
-                    "TCI_B": {**visual, "band": 3},
                     "B02": assets["blue"],
                     "B03": assets["green"],
                     "B04": assets["red"],
@@ -151,8 +158,9 @@ def main() -> None:
             "collection": COLLECTION,
             "provider": "Earth Search / AWS Open Data",
             "year": year,
-            "quarter": 1,
-            "period": {"start": f"{year}-01-01T00:00:00Z", "end_inclusive": f"{year}-03-31T23:59:59Z"},
+            "month": 7,
+            "scenes_per_grid": max(1, args.scenes_per_grid),
+            "period": {"start": f"{year}-07-01T00:00:00Z", "end_inclusive": f"{year}-07-31T23:59:59Z"},
             "bbox": BBOX,
             "scene_set_id": scene_set_id,
             "item_count": len(records),
@@ -161,7 +169,7 @@ def main() -> None:
         }
         destination = output / f"{year}.json"
         destination.write_text(json.dumps(catalogue, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"{year}: {len(records)} MGRS scenes, {scene_set_id} -> {destination}", flush=True)
+        print(f"{year}: {len(records)} July scenes, {scene_set_id} -> {destination}", flush=True)
 
 
 if __name__ == "__main__":

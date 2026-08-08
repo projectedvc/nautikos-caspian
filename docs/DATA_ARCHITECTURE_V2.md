@@ -11,15 +11,19 @@ Every annual comparison uses the same spatial grid, projection, resolution and
 season:
 
 - years: 2020, 2021, 2022, 2023, 2024, 2025 and 2026;
-- source: Copernicus Sentinel-2 Level-3 Quarterly Mosaic;
-- period: Q1 (1 January through 31 March) of every year;
+- source: Copernicus Sentinel-2 Level-2A COG archive (Earth Search/AWS);
+- period: July (1 July through 31 July) of every year;
+- observations: the three least-cloudy scenes per MGRS grid;
 - native bands: B02, B03, B04 and B08 at 10 m;
 - display projection: EPSG:3857;
 - analysis projection: equal-area EPSG:6933;
 - extent: the Caspian Sea, its coastline buffer and the lower reaches of its
   tributaries;
-- 2026 is Q1 2026, not an alias of 2025 and not a forecast. Q1 is used because
-  the official Q2 2026 L3 mosaic is not yet published in the CDSE catalogue.
+- 2026 uses actual July 2026 observations, not an alias of 2025 and not a
+  forecast;
+- RGB is rendered from raw B04/B03/B02 reflectance with one fixed display
+  transform. Per-scene TCI images are not mixed because their independent
+  stretches create visible coloured strips.
 
 The UI must reject a comparison if either side does not have a completed
 manifest with a different `scene_set_id`. Both MapLibre maps use the same
@@ -29,9 +33,9 @@ camera. Moving the swipe divider never changes a year, scene, source or zoom.
 
 | Product | Observation | Resolution | Valid mask | Purpose |
 | --- | --- | ---: | --- | --- |
-| `rgb` | Sentinel-2 L3 Q1 B04/B03/B02 | 10 m | L3 data mask | Stable photographic base |
-| `water_extent` | Sentinel-2 L3 Q1 NDWI | 10 m | valid optical pixels | Shoreline and exposed seabed |
-| `vegetation` | Sentinel-2 L3 Q1 NDVI | 10 m | land and coastal buffer | Vegetation loss/recovery |
+| `rgb` | Sentinel-2 L2A July B04/B03/B02 | 10 m | SCL valid-pixel mask | Stable photographic base |
+| `water_extent` | Sentinel-2 L2A July NDWI | 10 m | SCL valid optical pixels | Shoreline and exposed seabed |
+| `vegetation` | Sentinel-2 L2A July NDVI | 10 m | land and coastal buffer | Vegetation loss/recovery |
 | `water_colour` | Sentinel-3 OLCI L2 WFR | 300 m | inland-water pixels and quality flags | Large water masses |
 | `chlorophyll` | Sentinel-3 OLCI L2 WFR CHL | 300 m | water + quality flags | Bloom screening |
 | `suspended_matter` | Sentinel-3 OLCI L2 WFR TSM | 300 m | water + quality flags | River and discharge plumes |
@@ -48,10 +52,11 @@ rectangular image footprint merely because a source scene intersects it.
 The authoritative data lives on the Jupyter server, not in Vercel and not in
 the Git repository.
 
-The public CDSE STAC catalogue resolves the Caspian extent to 149 MGRS tiles
-per year. B02, B03, B04, B08 and the observation mask require 671.08 GiB in
-total for 2020–2026 (Q1). Derived COGs, tile pyramids and validated water
-products are budgeted separately; the deployment must reserve at least 1 TiB.
+The fixed catalogue contains 3124 real Sentinel-2 observations for 2020–2026
+(444–447 scenes per year). Only B02, B03, B04, B08 and SCL are localized. The
+expected raw footprint is 1.1–1.8 TiB depending on COG compression. Derived
+COGs and the precomputed tile cache are budgeted separately; keep at least
+2 TiB available while the initial build is running.
 
 ```text
 /home/jovyan/work/caspiansea/data-v2/
@@ -59,7 +64,7 @@ products are budgeted separately; the deployment must reserve at least 1 TiB.
   catalog/{source}/{year}.json
   vrt/{product}/{year}.vrt
   cog/{product}/{year}.tif
-  tiles/{product}/{year}/{z}/{x}/{y}.webp
+  tiles-v4/{product}/{year}/{z}/{x}/{y}.png
   vectors/rivers.pmtiles
   manifests/{product}/{year}.json
   exports/{job_id}.png
@@ -76,6 +81,12 @@ POST /v2/aoi/export
 POST /v2/aoi/solutions
 GET  /v2/exports/{job_id}.png
 ```
+
+All historical filters are precomputed. RGB and analytical tiles share the
+same Web Mercator bounds and pixel grid, so changing a product cannot shift or
+resize it. Normal users never call Copernicus or Earth Search; Vercel requests
+immutable tiles from the Jupyter data origin. On-demand rendering is only a
+fallback for an uncached detailed tile and the result is cached permanently.
 
 ## Provenance and quality gates
 

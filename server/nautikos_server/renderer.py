@@ -69,11 +69,11 @@ def ramp(values: np.ndarray, valid: np.ndarray, low: float, high: float, alpha: 
 
 
 class CatalogRenderer:
-    """Render immutable XYZ tiles from the official CDSE L3 COG catalogue.
+    """Render immutable XYZ tiles from the public ESA Sentinel-2 L2A COG archive.
 
-    Every first request is read from the fixed quarterly scene set and written
-    to the local cache. Later map movements and Vercel requests never contact
-    Copernicus again for the same tile.
+    Every first request is read from the fixed July scene set and written to
+    the local cache. Prewarming does this before a presentation, so later map
+    movements and Vercel requests only read finished local PNG tiles.
     """
 
     def __init__(self, settings: Settings):
@@ -82,9 +82,10 @@ class CatalogRenderer:
             settings.nautikos_data_root / "catalog" / "sentinel-2-earth-search",
             settings.nautikos_data_root / "catalog" / "sentinel-2-l3-quarterly",
         )
-        # v3 deliberately starts with an empty namespace so no legacy demo
-        # pixels or failed mosaics can leak into the verified scene set.
-        self.cache_root = settings.nautikos_data_root / "tiles-v3"
+        # v4 invalidates legacy TCI-based tiles. Those files used independent
+        # per-scene display stretches and caused the dark vertical strips that
+        # were visible in the previous deployment.
+        self.cache_root = settings.nautikos_data_root / "tiles-v4"
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
         endpoint = settings.cdse_s3_endpoint.rstrip("/")
@@ -317,9 +318,11 @@ class CatalogRenderer:
             items = [item for item in catalog["items"] if item.get("bbox") and intersects(item["bbox"], geographic)]
             if not items:
                 raise FileNotFoundError("tile does not intersect the fixed scene set")
-            if product == "rgb" and all("TCI_R" in item["assets"] for item in items):
-                bands = ("TCI_R", "TCI_G", "TCI_B")
-            elif product == "rgb":
+            if product == "rgb":
+                # TCI files contain scene-specific display stretches. Mixing
+                # them creates visible stripes even when every source pixel is
+                # valid. Raw reflectance plus one fixed stretch gives every
+                # MGRS acquisition the same radiometry.
                 bands = ("B04", "B03", "B02")
             elif product in {"water_colour"}:
                 bands = ("B04", "B03", "B02", "B08")

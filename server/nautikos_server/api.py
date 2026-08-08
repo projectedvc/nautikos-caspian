@@ -5,6 +5,7 @@ import math
 import re
 from io import BytesIO
 from pathlib import Path
+from threading import BoundedSemaphore
 from typing import Literal
 
 import numpy as np
@@ -30,6 +31,11 @@ PRODUCT_RE = re.compile(r"^[a-z][a-z0-9_-]{1,48}$")
 TILE_RE = re.compile(r"^[0-9]+$")
 settings = get_settings()
 renderer = CatalogRenderer(settings)
+# A browser can request dozens of tiles after a single zoom gesture.  Each
+# uncached render opens several COG windows, so unbounded FastAPI worker threads
+# can exhaust memory and kill the data service.  Two concurrent builds keep
+# the interactive API healthy; the rest wait and then reuse the immutable tile.
+render_slots = BoundedSemaphore(2)
 
 app = FastAPI(title="Nautikos data API", version=__version__)
 app.add_middleware(
@@ -148,10 +154,11 @@ def manifest() -> dict:
 def tile(product: str, year: int, z: str, x: str, y: str, extension: Literal["webp", "png", "jpg"]):
     if year not in YEARS or not PRODUCT_RE.fullmatch(product) or not all(TILE_RE.fullmatch(value) for value in (z, x, y)):
         raise HTTPException(status_code=400, detail="Invalid tile path")
-    path = settings.nautikos_data_root / "tiles-v3" / product / str(year) / z / x / f"{y}.{extension}"
+    path = settings.nautikos_data_root / "tiles-v4" / product / str(year) / z / x / f"{y}.{extension}"
     if not path.is_file() and extension == "png" and product in SUPPORTED_PRODUCTS:
         try:
-            path = renderer.render(product, year, int(z), int(x), int(y))
+            with render_slots:
+                path = renderer.render(product, year, int(z), int(x), int(y))
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:

@@ -55,7 +55,8 @@ test("uses the Jupyter data service, real annual products and AOI tools", async 
   assert.doesNotMatch(component, /monthlyOverviewUrl/);
   assert.doesNotMatch(component, /GROQ_API_KEY/);
 
-  assert.match(basemapRoute, /tiles.*basemap/s);
+  assert.match(basemapRoute, /REGIONAL-SATELLITE-CONTEXT/);
+  assert.doesNotMatch(basemapRoute, /writeFile|mkdir/);
   assert.match(processRoute, /NAUTIKOS_DATA_DIR/);
   assert.match(processRoute, /process\/v1/);
   assert.match(processRoute, /sentinel-1-grd/);

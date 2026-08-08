@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -20,7 +21,10 @@ from urllib.parse import urlparse
 import requests
 
 
-DEFAULT_ASSETS = ("visual", "blue", "green", "red", "nir", "scl")
+# RGB and every environmental index are calculated from the same reflectance
+# bands. The pre-stretched `visual` COG is intentionally excluded: it is large
+# and its per-scene colour correction creates visible seams in a mosaic.
+DEFAULT_ASSETS = ("blue", "green", "red", "nir", "scl")
 
 
 def parse_years(value: str) -> list[int]:
@@ -75,7 +79,14 @@ def main() -> None:
     requested = tuple(part.strip() for part in args.assets.split(",") if part.strip())
     urls: set[str] = set()
     for year in args.years:
-        catalogue = json.loads((args.catalog_root / f"{year}.json").read_text(encoding="utf-8"))
+        source_catalogue = args.catalog_root / f"{year}.json"
+        catalogue = json.loads(source_catalogue.read_text(encoding="utf-8"))
+        # The API reads its immutable catalogue from the data root. Keep that
+        # copy synchronized with the exact scene set being downloaded so a
+        # restart can never combine new assets with an older year manifest.
+        local_catalogue = args.data_root / "catalog" / "sentinel-2-earth-search" / f"{year}.json"
+        local_catalogue.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_catalogue, local_catalogue)
         for item in catalogue["items"]:
             for name in requested:
                 asset = item.get("assets", {}).get(name)

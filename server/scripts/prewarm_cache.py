@@ -13,6 +13,13 @@ import requests
 BBOX = (46.0, 36.0, 55.8, 47.4)
 
 
+def integer_range(value: str) -> list[int]:
+    if ":" in value:
+        first, last = (int(part) for part in value.split(":", 1))
+        return list(range(first, last + 1))
+    return [int(part) for part in value.split(",") if part.strip()]
+
+
 def lonlat_to_tile(lon: float, lat: float, zoom: int) -> tuple[int, int]:
     lat = max(-85.05112878, min(85.05112878, lat))
     scale = 1 << zoom
@@ -35,14 +42,17 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--api", default="http://127.0.0.1:8787")
     parser.add_argument("--years", default="2020,2026,2021,2022,2023,2024,2025")
-    parser.add_argument("--products", default="rgb,water_extent,turbidity,vegetation")
-    parser.add_argument("--zooms", default="3,4,5,6")
+    parser.add_argument(
+        "--products",
+        default="rgb,water_colour,water_extent,turbidity,suspended_matter,vegetation,soil_stress",
+    )
+    parser.add_argument("--zooms", default="3,4,5,6,7,8,9")
     parser.add_argument("--workers", type=int, default=2)
     args = parser.parse_args()
 
-    years = [int(value) for value in args.years.split(",")]
+    years = integer_range(args.years)
     products = [value.strip() for value in args.products.split(",") if value.strip()]
-    zooms = [int(value) for value in args.zooms.split(",")]
+    zooms = integer_range(args.zooms)
     jobs = [
         (product, year, z, x, y)
         for product in products
@@ -53,17 +63,29 @@ def main() -> None:
 
     def fetch(job: tuple[str, int, int, int, int]) -> tuple[tuple[str, int, int, int, int], int]:
         product, year, z, x, y = job
-        response = requests.get(f"{args.api}/v2/tiles/{product}/{year}/{z}/{x}/{y}.png", timeout=300)
-        return job, response.status_code
+        url = f"{args.api}/v2/tiles/{product}/{year}/{z}/{x}/{y}.png"
+        status = 599
+        for _ in range(4):
+            try:
+                response = requests.get(url, timeout=900)
+                status = response.status_code
+                if status in (200, 404):
+                    break
+            except requests.RequestException:
+                continue
+        return job, status
 
     complete = 0
+    failures: list[tuple[tuple[str, int, int, int, int], int]] = []
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
         futures = [pool.submit(fetch, job) for job in jobs]
         for future in as_completed(futures):
             job, status = future.result()
             complete += 1
-            print(f"{complete}/{len(jobs)} {job}: HTTP {status}", flush=True)
-    failures = [future.result() for future in futures if future.result()[1] != 200]
+            if status not in (200, 404):
+                failures.append((job, status))
+            if complete % 25 == 0 or status not in (200, 404) or complete == len(jobs):
+                print(f"{complete}/{len(jobs)} {job}: HTTP {status}", flush=True)
     if failures:
         raise SystemExit(f"{len(failures)} cache requests failed")
 

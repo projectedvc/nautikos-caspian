@@ -238,37 +238,37 @@ const SUPPORTED_FILTERS = new Set<ViewKey>(["optical", "waterOptical", "shorelin
 const FILTER_COPY: Partial<Record<ViewKey, Pick<FilterDefinition, "label" | "subtitle" | "explanation">>> = {
   optical: {
     label: "Реальный снимок Каспия",
-    subtitle: "Sentinel‑2 L3 · единый Q1 · 10 м",
-    explanation: "Реальная квартальная мозаика Sentinel‑2 из Copernicus Data Space. Для всех лет используется один период и одна сетка, поэтому шторка сравнивает 2020–2026 без подмены кадра при приближении.",
+    subtitle: "Sentinel‑2 L2A · единый июль · 10 м",
+    explanation: "Реальная июльская мозаика Sentinel‑2. Для всех лет используется один сезон и одна сетка; несколько очищенных от облаков сцен закрывают разрывы, а шторка сравнивает 2020–2026 без подмены кадра при приближении.",
   },
   waterOptical: {
     label: "Оптическая поверхность воды",
-    subtitle: "Sentinel‑2 L3 · RGB + NDWI · 10 м",
+    subtitle: "Sentinel‑2 L2A · RGB + NDWI · июль · 10 м",
     explanation: "Исходные RGB‑пиксели показаны только внутри спектральной маски воды. Слой помогает рассматривать цвет воды, речные шлейфы и прибрежные изменения без окрашивания суши.",
   },
   shoreline: {
     label: "Граница воды и обмеление",
-    subtitle: "Sentinel‑2 L3 · NDWI · 10 м",
+    subtitle: "Sentinel‑2 L2A · NDWI · июль · 10 м",
     explanation: "Контур рассчитан из зелёного и ближнего инфракрасного каналов того же годового кадра. Жёлтая кромка показывает измеренную границу воды, а шторка — её смещение между годами.",
   },
   water: {
     label: "Мутность и шлейфы сбросов",
-    subtitle: "Sentinel‑2 L3 · NDTI‑скрининг · 10 м",
+    subtitle: "Sentinel‑2 L2A · NDTI‑скрининг · июль · 10 м",
     explanation: "Индекс красного и зелёного отражения применяется только внутри маски воды. Тёплые зоны — кандидаты на взвесь или речной/техногенный шлейф, которые требуют проверки повторным снимком и пробой воды.",
   },
   suspendedMatter: {
     label: "Взвесь в воде",
-    subtitle: "Sentinel‑2 L3 · Red/Green · 10 м",
+    subtitle: "Sentinel‑2 L2A · Red/Green · июль · 10 м",
     explanation: "Относительный сигнал взвешенного вещества рассчитан из согласованных красного и зелёного каналов. Это сравнительный приоритет для обследования, а не лабораторная концентрация.",
   },
   vegetation: {
     label: "Растительность побережья",
-    subtitle: "Sentinel‑2 L3 · NDVI · 10 м",
+    subtitle: "Sentinel‑2 L2A · NDVI · июль · 10 м",
     explanation: "NDVI показывает потерю и восстановление растительного покрова вокруг Каспия на одинаковой сетке 2020–2026.",
   },
   soil: {
     label: "Оголение и стресс почвы",
-    subtitle: "Sentinel‑2 L3 · Visible/NIR · 10 м",
+    subtitle: "Sentinel‑2 L2A · Visible/NIR · июль · 10 м",
     explanation: "Слой выделяет сушу со слабым растительным сигналом как кандидата на деградацию. Для диагноза засоления или загрязнения нужна полевая проба.",
   },
 };
@@ -360,11 +360,11 @@ function overviewCoordinates(): [[number, number], [number, number], [number, nu
 }
 
 function productPeriod(year: number, layer: LayerKey) {
-  if (["true-color", "shoreline", "vegetation"].includes(layer)) return `Sentinel-2 L3 · Q1 ${year} · 10/20 м`;
+  if (["true-color", "shoreline", "vegetation"].includes(layer)) return `Sentinel-2 L2A · июль ${year} · 10/20 м`;
   if (layer === "erosion-risk") return "статический рельеф";
-  if (layer === "water-temperature") return `Q1 ${year} · водная маска`;
-  if (layer === "oil-roughness") return `Q1 ${year} · SAR-кандидаты`;
-  return `Q1 ${year} · проверенный локальный продукт`;
+  if (layer === "water-temperature") return `Июль ${year} · водная маска`;
+  if (layer === "oil-roughness") return `Июль ${year} · SAR-кандидаты`;
+  return `Июль ${year} · проверенный локальный продукт`;
 }
 
 function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, version: number) {
@@ -406,41 +406,24 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
     source: "annual-photo-tiles",
     minzoom: 6,
     paint: {
-      // A small amount of the co-registered annual frame softens radiometric
-      // differences between neighbouring Sentinel acquisitions without
-      // hiding the native 10 m detail.
-      "raster-opacity": 0.94,
+      // The detailed layer is already a cloud-cleaned, consistently stretched
+      // composite. Keep valid pixels fully opaque; the overview is visible
+      // only through genuine nodata, never through the satellite image.
+      "raster-opacity": 1,
       "raster-fade-duration": 0,
       "raster-resampling": "linear",
     },
   }, "place-labels");
 
   if (layer !== "true-color") {
-    map.addSource("annual-filter-overview", {
-      type: "image",
-      url: annualOverviewUrl(year, layer, version),
-      coordinates: overviewCoordinates(),
-    });
-    map.addLayer({
-      id: "annual-filter-overview",
-      type: "raster",
-      source: "annual-filter-overview",
-      minzoom: 3,
-      // At zoom 6 the fixed Sentinel COG tile takes over.  Keeping the
-      // overview alive above that point rendered two semi-transparent masks
-      // on top of each other and produced the heavy, misaligned colours.
-      maxzoom: 6,
-      paint: {
-        "raster-opacity": layer === "shoreline" ? 0.94 : 0.88,
-        "raster-fade-duration": 0,
-        "raster-resampling": "linear",
-      },
-    }, "place-labels");
+    // Analytical products are always XYZ tiles. A stretched full-frame image
+    // cannot share MapLibre's exact tile grid at every zoom and was the source
+    // of shifted, oversized overlays in the previous build.
     map.addSource("annual-filter-tiles", {
       type: "raster",
       tiles: [annualTileUrl(year, layer, version)],
       tileSize: 256,
-      minzoom: 6,
+      minzoom: 3,
       maxzoom: layer === "olci-true-color" || layer === "chlorophyll" || layer === "suspended-matter" ? 11 : 14,
       bounds: CASPIAN_BBOX,
     });
@@ -448,9 +431,11 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
       id: "annual-filter-tiles",
       type: "raster",
       source: "annual-filter-tiles",
-      minzoom: 6,
+      minzoom: 3,
       paint: {
-        "raster-opacity": layer === "shoreline" ? 0.94 : 0.88,
+        // Opacity is encoded once in the PNG alpha channel. Applying a second
+        // layer opacity washes the palette out and exposes rectangular seams.
+        "raster-opacity": 1,
         "raster-fade-duration": 0,
         "raster-resampling": "linear",
       },
@@ -512,7 +497,7 @@ export default function CaspianTwin() {
   // Bump when a raster contract changes.  This is intentionally part of every
   // overview and XYZ URL so browsers and the Vercel edge cannot keep an older
   // mask after the rendering pipeline has been corrected.
-  const tileVersion = 26;
+  const tileVersion = 27;
   const [timelapseFromYear, setTimelapseFromYear] = useState(2020);
   const [timelapseToYear, setTimelapseToYear] = useState(2026);
   const [timelapseYear, setTimelapseYear] = useState(2020);
@@ -1022,11 +1007,11 @@ export default function CaspianTwin() {
         {workspaceMode === "monitoring" && compareEnabled && <div className="compare-divider" style={{ left: `${swipe}%` }} onPointerDown={(event) => { event.preventDefault(); swipeDraggingRef.current = true; updateSwipeAt(event.clientX); }}><span>↔</span></div>}
         {workspaceMode === "monitoring" && activeFilter.legend.length > 0 && <div className="map-legend"><strong>{activeFilter.label}</strong>{activeFilter.legend.map((item) => <span key={item.label}><i style={{ background: item.color }} />{item.label}</span>)}</div>}
         {workspaceMode === "solutions" && <div className="timelapse-panel">
-          <div className="timelapse-head"><div><span>РЕАЛЬНЫЙ РЯД {timelapseFromYear}–{timelapseToYear}</span><strong>Q1 {timelapseYear}</strong></div><button onClick={toggleTimelapse}>{timelapsePlaying ? "Ⅱ" : "▶"}<span>{timelapsePlaying ? "Пауза" : "Показать изменения"}</span></button></div>
+          <div className="timelapse-head"><div><span>РЕАЛЬНЫЙ РЯД {timelapseFromYear}–{timelapseToYear}</span><strong>ИЮЛЬ {timelapseYear}</strong></div><button onClick={toggleTimelapse}>{timelapsePlaying ? "Ⅱ" : "▶"}<span>{timelapsePlaying ? "Пауза" : "Показать изменения"}</span></button></div>
           <div className="timelapse-range"><label><span>С</span><select aria-label="Начальный год ряда" value={timelapseFromYear} onChange={(event) => { const year = Number(event.target.value); setTimelapseFromYear(year); setTimelapseYear(year); setTimelapsePlaying(false); }}>{YEARS.map((year) => <option key={year} value={year} disabled={year > timelapseToYear}>{year}</option>)}</select></label><span>→</span><label><span>ПО</span><select aria-label="Конечный год ряда" value={timelapseToYear} onChange={(event) => { const year = Number(event.target.value); setTimelapseToYear(year); if (timelapseYear > year) setTimelapseYear(timelapseFromYear); setTimelapsePlaying(false); }}>{YEARS.map((year) => <option key={year} value={year} disabled={year < timelapseFromYear}>{year}</option>)}</select></label></div>
           <div className="timelapse-controls"><input aria-label="Текущий год ряда" type="range" min={timelapseFromYear} max={timelapseToYear} step="1" value={timelapseYear} onChange={(event) => { setTimelapseYear(Number(event.target.value)); setTimelapsePlaying(false); }} /><span>{timelapseYear}</span></div>
         </div>}
-        <div className="map-statusbar"><span>{workspaceMode === "solutions" ? `Решение · ${SOLUTIONS.find((item) => item.id === solutionType)?.label} · Q1 ${timelapseYear}` : compareEnabled ? `${beforeYear} ↔ ${afterYear} · ${activeFilter.label}` : `${afterYear} · ${activeFilter.label}`}</span><span>Nautikos · локальные продукты Каспия</span></div>
+        <div className="map-statusbar"><span>{workspaceMode === "solutions" ? `Решение · ${SOLUTIONS.find((item) => item.id === solutionType)?.label} · июль ${timelapseYear}` : compareEnabled ? `${beforeYear} ↔ ${afterYear} · ${activeFilter.label}` : `${afterYear} · ${activeFilter.label}`}</span><span>Nautikos · локальные продукты Каспия</span></div>
       </section>
 
       <aside className={`inspector ${inspectorOpen ? "" : "hidden"}`}>
