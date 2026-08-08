@@ -21,6 +21,7 @@ from rasterio.warp import transform_bounds
 from rasterio.windows import from_bounds as window_from_bounds
 
 from . import __version__
+from .renderer import CatalogRenderer, SUPPORTED_PRODUCTS
 from .settings import get_settings
 
 
@@ -28,6 +29,7 @@ YEARS = tuple(range(2020, 2027))
 PRODUCT_RE = re.compile(r"^[a-z][a-z0-9_-]{1,48}$")
 TILE_RE = re.compile(r"^[0-9]+$")
 settings = get_settings()
+renderer = CatalogRenderer(settings)
 
 app = FastAPI(title="Nautikos data API", version=__version__)
 app.add_middleware(
@@ -147,6 +149,15 @@ def tile(product: str, year: int, z: str, x: str, y: str, extension: Literal["we
     if year not in YEARS or not PRODUCT_RE.fullmatch(product) or not all(TILE_RE.fullmatch(value) for value in (z, x, y)):
         raise HTTPException(status_code=400, detail="Invalid tile path")
     path = settings.nautikos_data_root / "tiles" / product / str(year) / z / x / f"{y}.{extension}"
+    if not path.is_file() and extension == "png" and product in SUPPORTED_PRODUCTS:
+        try:
+            path = renderer.render(product, year, int(z), int(x), int(y))
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Satellite tile is temporarily unavailable: {exc}") from exc
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Tile not found")
     return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
