@@ -384,7 +384,11 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
     type: "raster",
     source: "annual-photo-overview",
     minzoom: 3,
-    maxzoom: 8,
+    // Keep the seamless annual frame underneath the native Sentinel tiles at
+    // every zoom.  Transparent cloud/nodata pixels in a detailed tile then
+    // reveal the same year's overview instead of a dark hole or a different
+    // provider's imagery.
+    maxzoom: 16,
     paint: { "raster-opacity": 1, "raster-fade-duration": 0, "raster-resampling": "linear" },
   }, "place-labels");
 
@@ -402,7 +406,10 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
     source: "annual-photo-tiles",
     minzoom: 6,
     paint: {
-      "raster-opacity": 1,
+      // A small amount of the co-registered annual frame softens radiometric
+      // differences between neighbouring Sentinel acquisitions without
+      // hiding the native 10 m detail.
+      "raster-opacity": 0.94,
       "raster-fade-duration": 0,
       "raster-resampling": "linear",
     },
