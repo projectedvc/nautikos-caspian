@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PNG } from "pngjs";
@@ -32,7 +33,10 @@ function regression(points: Array<{ year: number; value: number }>, min: number,
 }
 
 async function readMetrics(year: number, bbox: BBox) {
-  const bytes = await readFile(path.join(LOCAL_DATA_ROOT, "metrics", "annual", `${year}.png`));
+  const bundled = path.join(process.cwd(), "public", "metrics", "annual", `${year}.png`);
+  const serverCopy = path.join(LOCAL_DATA_ROOT, "metrics", "annual", `${year}.png`);
+  const metricPath = existsSync(serverCopy) ? serverCopy : bundled;
+  const bytes = await readFile(metricPath);
   const png = PNG.sync.read(bytes);
   const [cw, cs, ce, cn] = CASPIAN_BBOX;
   const west = Math.max(cw, bbox[0]);
@@ -91,8 +95,8 @@ export async function POST(request: Request) {
     const vegetation = regression(series.map((point) => ({ year: point.year, value: point.vegetation })), -1, 1);
     const soilStress = regression(series.map((point) => ({ year: point.year, value: point.soilStress })), 0, 1);
     const result = {
-      source: "Nautikos local Sentinel‑2 analysis cube",
-      method: "Одинаковый фиксированный период 1–15 июля каждого года; расчёт только по пикселям выбранной области",
+      source: "Nautikos fixed Sentinel‑2 Q1 analysis cube",
+      method: "Сопоставимые квартальные продукты Q1 2020–2026; расчёт только по пикселям выбранной области",
       resolutionDegrees: 0.022,
       series,
       forecast: { year: 2027, waterShare: water.value, vegetation: vegetation.value, soilStress: soilStress.value },
