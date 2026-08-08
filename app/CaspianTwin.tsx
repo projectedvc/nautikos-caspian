@@ -30,6 +30,7 @@ type ViewKey = "optical" | "waterOptical" | "shoreline" | "water" | "chlorophyll
 type LayerKey = "true-color" | "olci-true-color" | "shoreline" | "water-quality" | "chlorophyll" | "suspended-matter" | "water-temperature" | "vegetation" | "coast-moisture" | "soil-stress" | "erosion-risk" | "oil-roughness";
 type WorkspaceMode = "monitoring" | "solutions";
 type SidebarSection = "water" | "land" | "tools";
+type SolutionKey = "discharge" | "wetland" | "shoreline" | "vegetation" | "oil-response";
 type AoiScreen = { left: number; top: number; width: number; height: number };
 
 type AiResult = {
@@ -72,11 +73,30 @@ type FilterDefinition = {
 const CASPIAN_BBOX: BBox = [46.0, 36.0, 55.8, 47.4];
 const REGIONAL_BASEMAP_BBOX: BBox = [25, 25, 75, 60];
 const YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
-const OVERVIEW_CACHE_VERSION = 28;
-const TIMELAPSE_CACHE_VERSION = 16;
-const MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+const DATA_API_BASE = (process.env.NEXT_PUBLIC_NAUTIKOS_DATA_URL ?? "").replace(/\/$/, "");
 const WATER_FILTERS: ViewKey[] = ["optical", "waterOptical", "water", "oil", "chlorophyll", "suspendedMatter", "waterTemperature", "shoreline"];
 const LAND_FILTERS: ViewKey[] = ["optical", "shoreline", "vegetation", "coastMoisture", "soil", "erosion"];
+const PRODUCT_BY_LAYER: Record<LayerKey, string> = {
+  "true-color": "rgb",
+  "olci-true-color": "water_colour",
+  shoreline: "water_extent",
+  "water-quality": "turbidity",
+  chlorophyll: "chlorophyll",
+  "suspended-matter": "suspended_matter",
+  "water-temperature": "water_temperature",
+  vegetation: "vegetation",
+  "coast-moisture": "coast_moisture",
+  "soil-stress": "soil_stress",
+  "erosion-risk": "terrain_runoff",
+  "oil-roughness": "oil_candidates",
+};
+const SOLUTIONS: Array<{ id: SolutionKey; label: string; detail: string; icon: typeof Sparkles }> = [
+  { id: "discharge", label: "Проверка сбросов", detail: "Исток шлейфа, точки отбора проб и маршрут", icon: Droplets },
+  { id: "wetland", label: "Восстановление дельты", detail: "Участки удержания воды и защиты нерестилищ", icon: Waves },
+  { id: "shoreline", label: "Защита берега", detail: "Эрозионные зоны и природные буферы", icon: ScanSearch },
+  { id: "vegetation", label: "Восстановление покрова", detail: "Посадка только по влаге, почве и стоку", icon: Leaf },
+  { id: "oil-response", label: "Проверка нефтяного следа", detail: "SAR-кандидат, ветер, AIS и повторный пролёт", icon: Radar },
+];
 
 const regions: Region[] = [
   { id: "all", name: "Весь Каспий", bbox: CASPIAN_BBOX },
@@ -259,10 +279,6 @@ function baseStyle(): StyleSpecification {
   };
 }
 
-function annualOverviewUrl(year: number, layer: LayerKey, version: number) {
-  return `/api/sentinel/process?year=${year}&layer=${layer}&v=${version}-${OVERVIEW_CACHE_VERSION}`;
-}
-
 function regionalBasemapTileUrl() {
   return `/api/basemap?z={z}&x={x}&y={y}&v=regional-surface-2`;
 }
@@ -286,24 +302,15 @@ function addRegionalBasemap(map: MapLibreMap) {
 }
 
 function annualTileUrl(year: number, layer: LayerKey, version: number) {
-  return `/api/sentinel/process?year=${year}&layer=${layer}&z={z}&x={x}&y={y}&width=512&height=512&v=fixed-pyramid-${version}`;
-}
-
-function monthlyOverviewUrl(year: number, month: number, version: number) {
-  return `/api/sentinel/process?year=${year}&month=${month}&layer=true-color&bbox=${CASPIAN_BBOX.join(",")}&width=640&height=800&v=timelapse-${TIMELAPSE_CACHE_VERSION}`;
+  return `${DATA_API_BASE}/v2/tiles/${PRODUCT_BY_LAYER[layer]}/${year}/{z}/{x}/{y}.png?v=${version}`;
 }
 
 function productPeriod(year: number, layer: LayerKey) {
+  if (["true-color", "shoreline", "vegetation"].includes(layer)) return `Sentinel-2 L3 · Q1 ${year} · 10/20 м`;
   if (layer === "erosion-risk") return "статический рельеф";
-  if (layer === "water-temperature") return `1—10 июля ${year}`;
-  if (layer === "oil-roughness") return `июль ${year}`;
-  return `1—15 июля ${year}`;
-}
-
-function nativeTileMaxZoom(layer: LayerKey) {
-  if (["olci-true-color", "chlorophyll", "suspended-matter", "water-temperature"].includes(layer)) return 9;
-  if (["shoreline", "water-quality", "vegetation", "coast-moisture", "soil-stress"].includes(layer)) return 10;
-  return 11;
+  if (layer === "water-temperature") return `Q1 ${year} · водная маска`;
+  if (layer === "oil-roughness") return `Q1 ${year} · SAR-кандидаты`;
+  return `Q1 ${year} · проверенный локальный продукт`;
 }
 
 function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, version: number) {
@@ -313,71 +320,46 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
     if (map.getSource(id)) map.removeSource(id);
   }
 
-  const [west, south, east, north] = CASPIAN_BBOX;
-  const coordinates: [[number, number], [number, number], [number, number], [number, number]] = [
-    [west, north], [east, north], [east, south], [west, south],
-  ];
-
-  // Every annual product uses the same bbox and exact pixel grid.  True colour
-  // carries the measured yearly water extent at basin scale and fades into the
-  // same HD satellite pyramid at detailed zooms, so the image never jumps to a
-  // different acquisition footprint.
-  {
-    map.addSource("annual-filter-overview", {
-      type: "image",
-      url: annualOverviewUrl(year, layer, version),
-      coordinates,
-    });
-    map.addLayer({
-      id: "annual-filter-overview",
-      type: "raster",
-      source: "annual-filter-overview",
-      maxzoom: 24,
-      paint: {
-        "raster-opacity": layer === "true-color"
-          ? ["interpolate", ["linear"], ["zoom"], 3, 0.96, 5.8, 0.90, 6.5, 0.34, 7, 0]
-          : 0.86,
-        "raster-fade-duration": 0,
-        "raster-resampling": "linear",
-      },
-    }, "place-labels");
-  }
+  map.addSource("annual-photo-tiles", {
+    type: "raster",
+    tiles: [annualTileUrl(year, "true-color", version)],
+    tileSize: 256,
+    minzoom: 3,
+    maxzoom: 14,
+    bounds: CASPIAN_BBOX,
+  });
+  map.addLayer({
+    id: "annual-photo-tiles",
+    type: "raster",
+    source: "annual-photo-tiles",
+    minzoom: 3,
+    paint: {
+      "raster-opacity": 1,
+      "raster-fade-duration": 0,
+      "raster-resampling": "linear",
+    },
+  }, "place-labels");
 
   if (layer !== "true-color") {
     map.addSource("annual-filter-tiles", {
       type: "raster",
       tiles: [annualTileUrl(year, layer, version)],
       tileSize: 256,
-      minzoom: 24,
-      maxzoom: nativeTileMaxZoom(layer),
+      minzoom: 3,
+      maxzoom: layer === "olci-true-color" || layer === "chlorophyll" || layer === "suspended-matter" ? 11 : 14,
       bounds: CASPIAN_BBOX,
     });
     map.addLayer({
       id: "annual-filter-tiles",
       type: "raster",
       source: "annual-filter-tiles",
-      paint: { "raster-opacity": 0.84, "raster-fade-duration": 0, "raster-resampling": "linear" },
+      paint: {
+        "raster-opacity": layer === "shoreline" ? 0.92 : 0.72,
+        "raster-fade-duration": 0,
+        "raster-resampling": "linear",
+      },
     }, "place-labels");
   }
-}
-
-function updateMonthlyFrame(map: MapLibreMap, year: number, month: number, version: number) {
-  for (const id of ["annual-photo-overview", "annual-photo-tiles", "annual-filter-overview", "annual-filter-tiles", "monthly-frame"]) {
-    if (map.getLayer(id)) map.removeLayer(id);
-    if (map.getSource(id)) map.removeSource(id);
-  }
-  const [west, south, east, north] = CASPIAN_BBOX;
-  map.addSource("monthly-frame", {
-    type: "image",
-    url: monthlyOverviewUrl(year, month, version),
-    coordinates: [[west, north], [east, north], [east, south], [west, south]],
-  });
-  map.addLayer({
-    id: "monthly-frame",
-    type: "raster",
-    source: "monthly-frame",
-    paint: { "raster-opacity": 1, "raster-fade-duration": 180, "raster-resampling": "linear" },
-  }, "place-labels");
 }
 
 function TrendChart({ result, metric }: { result: TrendResult; metric: keyof Pick<TrendPoint, "waterShare" | "vegetation" | "soilStress"> }) {
@@ -416,6 +398,7 @@ export default function CaspianTwin() {
   const swipeDraggingRef = useRef(false);
 
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("monitoring");
+  const [solutionType, setSolutionType] = useState<SolutionKey>("discharge");
   const [sidebarSection, setSidebarSection] = useState<SidebarSection>("water");
   const [activeView, setActiveView] = useState<ViewKey>("optical");
   const [beforeYear, setBeforeYear] = useState<number>(2020);
@@ -434,7 +417,6 @@ export default function CaspianTwin() {
   const [timelapseFromYear, setTimelapseFromYear] = useState(2020);
   const [timelapseToYear, setTimelapseToYear] = useState(2026);
   const [timelapseYear, setTimelapseYear] = useState(2020);
-  const [timelapseMonth, setTimelapseMonth] = useState(1);
   const [timelapsePlaying, setTimelapsePlaying] = useState(false);
   const [aoiScreen, setAoiScreen] = useState<AoiScreen | null>(null);
   const [trendStatus, setTrendStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -457,12 +439,11 @@ export default function CaspianTwin() {
     if (!mapNode.current || !compareMapNode.current || mapRef.current || compareMapRef.current) return;
     const options: Omit<MapOptions, "container"> = {
       center: [51.2, 41.8] as [number, number],
-      // The local XYZ pyramid starts at z5. Keeping the map at or above that
-      // level guarantees a real cached raster is always visible; the whole
-      // Caspian still fits inside the tall monitoring viewport at z5.
       zoom: 5,
-      minZoom: 5,
-      maxZoom: 16,
+      minZoom: 3,
+      // Sentinel-2 is 10 m. Stopping close to the native detail prevents the
+      // interface from pretending that blurred overscaling is new information.
+      maxZoom: 15,
       maxBounds: [[25, 25], [75, 60]] as [[number, number], [number, number]],
       dragPan: true,
       scrollZoom: true,
@@ -557,29 +538,24 @@ export default function CaspianTwin() {
     const primary = mapRef.current;
     const comparison = compareMapRef.current;
     if (workspaceMode === "solutions") {
-      if (primary.isStyleLoaded()) updateMonthlyFrame(primary, timelapseYear, timelapseMonth, tileVersion);
+      if (primary.isStyleLoaded()) updateAnnualTiles(primary, timelapseYear, "true-color", tileVersion);
       return;
     }
     updateAnnualTiles(primary, compareEnabled ? beforeYear : afterYear, activeFilter.layer, tileVersion);
     updateAnnualTiles(comparison, afterYear, activeFilter.layer, tileVersion);
-  }, [activeFilter.layer, afterYear, beforeYear, compareEnabled, mapsReady, tileVersion, timelapseMonth, timelapseYear, workspaceMode]);
+  }, [activeFilter.layer, afterYear, beforeYear, compareEnabled, mapsReady, tileVersion, timelapseYear, workspaceMode]);
 
   useEffect(() => {
     if (!timelapsePlaying || workspaceMode !== "solutions") return;
     const timer = setInterval(() => {
-      setTimelapseMonth((month) => {
-        const maxMonth = timelapseYear === 2026 ? 8 : 12;
-        if (month < maxMonth) return month + 1;
-        if (timelapseYear < timelapseToYear) {
-          setTimelapseYear((year) => year + 1);
-          return 1;
-        }
+      setTimelapseYear((year) => {
+        if (year < timelapseToYear) return year + 1;
         setTimelapsePlaying(false);
-        return month;
+        return year;
       });
-    }, 380);
+    }, 700);
     return () => clearInterval(timer);
-  }, [timelapsePlaying, timelapseToYear, timelapseYear, workspaceMode]);
+  }, [timelapsePlaying, timelapseToYear, workspaceMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -645,10 +621,8 @@ export default function CaspianTwin() {
       setTimelapsePlaying(false);
       return;
     }
-    const lastMonth = timelapseToYear === 2026 ? 8 : 12;
-    if (timelapseYear < timelapseFromYear || timelapseYear > timelapseToYear || (timelapseYear === timelapseToYear && timelapseMonth >= lastMonth)) {
+    if (timelapseYear < timelapseFromYear || timelapseYear >= timelapseToYear) {
       setTimelapseYear(timelapseFromYear);
-      setTimelapseMonth(1);
     }
     setTimelapsePlaying(true);
   }
@@ -745,6 +719,36 @@ export default function CaspianTwin() {
     link.download = "caspian-ai-area.geojson";
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function exportAoiImage() {
+    if (!aoi) return;
+    setSelectionNotice("Готовлю спутниковый фрагмент без элементов интерфейса…");
+    try {
+      const response = await fetch(`${DATA_API_BASE}/v2/aoi/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          bbox: aoi,
+          year: afterYear,
+          product: "rgb",
+          overlay: activeFilter.layer === "true-color" ? null : PRODUCT_BY_LAYER[activeFilter.layer],
+          width: 2048,
+          height: 1536,
+          format: "png",
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `nautikos-${afterYear}-${PRODUCT_BY_LAYER[activeFilter.layer]}.png`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showSelectionNotice("Спутниковый фрагмент сохранён в PNG.");
+    } catch {
+      showSelectionNotice("Снимок ещё не собран на сервере для этого года или слоя.");
+    }
   }
 
   function updateSwipeAt(clientX: number) {
@@ -844,6 +848,21 @@ export default function CaspianTwin() {
       </header>
 
       <aside className="filter-panel">
+        {workspaceMode === "solutions" ? <>
+          <div className="panel-heading"><span>КАСПИЙ · СЦЕНАРИЙ</span><h1>Решение для участка</h1></div>
+          <div className="filter-list grouped solution-list">
+            <span className="filter-group-title">ВЫБЕРИТЕ ЗАДАЧУ</span>
+            {SOLUTIONS.map((item) => {
+              const Icon = item.icon;
+              return <div className="filter-entry" key={item.id}><button className={solutionType === item.id ? "active" : ""} onClick={() => { setSolutionType(item.id); resetAnalysis(); }}><span className="filter-icon"><Icon size={17} /></span><span><strong>{item.label}</strong><small>{item.detail}</small></span></button></div>;
+            })}
+          </div>
+          <div className="sidebar-tools solution-tools">
+            <button className={drawing ? "active" : ""} onClick={drawing ? cancelDraw : beginDraw}>{drawing ? <X size={17} /> : <BoxSelect size={17} />}<span><strong>{drawing ? "Отменить выделение" : "Выбрать участок решения"}</strong><small>Любой размер; площадь не ограничена 50×50 км</small></span></button>
+            {aoi && <button onClick={exportAoiImage}><Download size={17} /><span><strong>Сохранить снимок участка</strong><small>PNG · {afterYear} · географическая привязка в имени</small></span></button>}
+            {aoi && <button onClick={clearAoi}><X size={17} /><span><strong>Очистить участок</strong><small>{selectedArea ? formatArea(selectedArea) : ""}</small></span></button>}
+          </div>
+        </> : <>
         <div className="panel-heading"><span>КАСПИЙ · РАБОЧИЕ СЛОИ</span><h1>{sidebarSection === "water" ? "Вода" : sidebarSection === "land" ? "Берег и суша" : "Инструменты"}</h1></div>
         <div className="sidebar-tabs" role="tablist" aria-label="Группы слоёв">
           <button className={sidebarSection === "water" ? "active" : ""} onClick={() => selectSidebar("water")}><Droplets size={15} /><span>Вода</span></button>
@@ -864,9 +883,11 @@ export default function CaspianTwin() {
             <label><span>РАБОЧИЙ РАЙОН</span><select value={selectedRegion} onChange={(event) => changeRegion(event.target.value)}>{regions.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}</select></label>
             <button className={drawing ? "active" : ""} onClick={drawing ? cancelDraw : beginDraw}>{drawing ? <X size={17} /> : <BoxSelect size={17} />}<span><strong>{drawing ? "Отменить выделение" : "Выбрать рабочую область"}</strong><small>Для площади, воды или AI</small></span></button>
             <button onClick={() => changeRegion("all")}><Focus size={17} /><span><strong>Показать весь Каспий</strong><small>Вернуть общий обзор</small></span></button>
+            {aoi && <button onClick={exportAoiImage}><Download size={17} /><span><strong>Сохранить снимок области</strong><small>PNG без панелей интерфейса</small></span></button>}
             {aoi && <button onClick={clearAoi}><X size={17} /><span><strong>Очистить область</strong><small>{selectedArea ? formatArea(selectedArea) : ""}</small></span></button>}
           </div>
         )}
+        </>}
       </aside>
 
       <section className="map-workspace">
@@ -902,11 +923,11 @@ export default function CaspianTwin() {
         {workspaceMode === "monitoring" && compareEnabled && <div className="compare-divider" style={{ left: `${swipe}%` }} onPointerDown={(event) => { event.preventDefault(); swipeDraggingRef.current = true; updateSwipeAt(event.clientX); }}><span>↔</span></div>}
         {workspaceMode === "monitoring" && activeFilter.legend.length > 0 && <div className="map-legend"><strong>{activeFilter.label}</strong>{activeFilter.legend.map((item) => <span key={item.label}><i style={{ background: item.color }} />{item.label}</span>)}</div>}
         {workspaceMode === "solutions" && <div className="timelapse-panel">
-          <div className="timelapse-head"><div><span>АРХИВ {timelapseFromYear}–{timelapseToYear}</span><strong>{MONTHS[timelapseMonth - 1]} {timelapseYear}</strong></div><button onClick={toggleTimelapse}>{timelapsePlaying ? "Ⅱ" : "▶"}<span>{timelapsePlaying ? "Пауза" : "Запустить период"}</span></button></div>
-          <div className="timelapse-range"><label><span>С</span><select aria-label="Начальный год таймлапса" value={timelapseFromYear} onChange={(event) => { const year = Number(event.target.value); setTimelapseFromYear(year); setTimelapseYear(year); setTimelapseMonth(1); setTimelapsePlaying(false); }}>{YEARS.map((year) => <option key={year} value={year} disabled={year > timelapseToYear}>{year}</option>)}</select></label><span>→</span><label><span>ПО</span><select aria-label="Конечный год таймлапса" value={timelapseToYear} onChange={(event) => { const year = Number(event.target.value); setTimelapseToYear(year); if (timelapseYear > year) { setTimelapseYear(timelapseFromYear); setTimelapseMonth(1); } setTimelapsePlaying(false); }}>{YEARS.map((year) => <option key={year} value={year} disabled={year < timelapseFromYear}>{year}</option>)}</select></label></div>
-          <div className="timelapse-controls"><input aria-label="Месяц текущего кадра" type="range" min="1" max={timelapseYear === 2026 ? 8 : 12} value={timelapseMonth} onChange={(event) => { setTimelapseMonth(Number(event.target.value)); setTimelapsePlaying(false); }} /><span>{String(timelapseMonth).padStart(2, "0")}</span></div>
+          <div className="timelapse-head"><div><span>РЕАЛЬНЫЙ РЯД {timelapseFromYear}–{timelapseToYear}</span><strong>Q1 {timelapseYear}</strong></div><button onClick={toggleTimelapse}>{timelapsePlaying ? "Ⅱ" : "▶"}<span>{timelapsePlaying ? "Пауза" : "Показать изменения"}</span></button></div>
+          <div className="timelapse-range"><label><span>С</span><select aria-label="Начальный год ряда" value={timelapseFromYear} onChange={(event) => { const year = Number(event.target.value); setTimelapseFromYear(year); setTimelapseYear(year); setTimelapsePlaying(false); }}>{YEARS.map((year) => <option key={year} value={year} disabled={year > timelapseToYear}>{year}</option>)}</select></label><span>→</span><label><span>ПО</span><select aria-label="Конечный год ряда" value={timelapseToYear} onChange={(event) => { const year = Number(event.target.value); setTimelapseToYear(year); if (timelapseYear > year) setTimelapseYear(timelapseFromYear); setTimelapsePlaying(false); }}>{YEARS.map((year) => <option key={year} value={year} disabled={year < timelapseFromYear}>{year}</option>)}</select></label></div>
+          <div className="timelapse-controls"><input aria-label="Текущий год ряда" type="range" min={timelapseFromYear} max={timelapseToYear} step="1" value={timelapseYear} onChange={(event) => { setTimelapseYear(Number(event.target.value)); setTimelapsePlaying(false); }} /><span>{timelapseYear}</span></div>
         </div>}
-        <div className="map-statusbar"><span>{workspaceMode === "solutions" ? `Месячный кадр · ${MONTHS[timelapseMonth - 1]} ${timelapseYear}` : compareEnabled ? `${beforeYear} ↔ ${afterYear} · ${activeFilter.label}` : `${afterYear} · ${activeFilter.label}`}</span><span>Nautikos · локальные продукты Каспия</span></div>
+        <div className="map-statusbar"><span>{workspaceMode === "solutions" ? `Решение · ${SOLUTIONS.find((item) => item.id === solutionType)?.label} · Q1 ${timelapseYear}` : compareEnabled ? `${beforeYear} ↔ ${afterYear} · ${activeFilter.label}` : `${afterYear} · ${activeFilter.label}`}</span><span>Nautikos · локальные продукты Каспия</span></div>
       </section>
 
       <aside className={`inspector ${inspectorOpen ? "" : "hidden"}`}>
@@ -935,7 +956,7 @@ export default function CaspianTwin() {
           <div className="empty-inspector"><div className="empty-map-icon"><BoxSelect size={26} /></div><h3>Карта работает без выделения</h3><p>Сравнивайте весь Каспий, годы и фильтры. Выделяйте участок только для измерений или подробного анализа.</p><button onClick={beginDraw}><BoxSelect size={16} /> Выбрать область</button><button className="secondary-action" onClick={() => { setAoi(CASPIAN_BBOX); resetAnalysis(); }}>Выбрать весь Каспий</button></div>
         ) : (
           <div className="inspector-content">
-            <section className="aoi-summary"><div><span>ПЛОЩАДЬ</span><strong>{selectedArea ? formatArea(selectedArea) : "—"}</strong></div><div><span>ПЕРИОД</span><strong>2020–2026</strong></div><div className="aoi-actions"><button onClick={exportAoi}><Download size={15} /> GeoJSON</button><button onClick={runAiAnalysis}><Droplets size={15} /> Доля воды</button><button onClick={runAiAnalysis}><Sparkles size={15} /> AI-анализ</button></div></section>
+            <section className="aoi-summary"><div><span>ПЛОЩАДЬ</span><strong>{selectedArea ? formatArea(selectedArea) : "—"}</strong></div><div><span>ПЕРИОД</span><strong>2020–2026</strong></div><div className="aoi-actions"><button onClick={exportAoi}><Download size={15} /> GeoJSON</button><button onClick={exportAoiImage}><Download size={15} /> Снимок PNG</button><button onClick={runAiAnalysis}><Droplets size={15} /> Доля воды</button><button onClick={runAiAnalysis}><Sparkles size={15} /> AI-анализ</button></div></section>
             <section className="analysis-card">
               <div className="analysis-title"><span className="analysis-icon"><Sparkles size={18} /></span><div><span>СПУТНИКОВЫЕ МЕТРИКИ + AI</span><h3>Сценарий на 2027</h3></div></div>
               <p>{activeFilter.explanation}</p>

@@ -1,0 +1,48 @@
+{
+  "schema": 2,
+  "comparison": {
+    "years": [2020, 2021, 2022, 2023, 2024, 2025, 2026],
+    "quarter": 1,
+    "display_crs": "EPSG:3857",
+    "analysis_crs": "EPSG:6933",
+    "bbox_wgs84": [46.0, 36.0, 55.8, 47.4]
+  },
+  "products": {
+    "rgb": {
+      "source": "sentinel-2-global-mosaics",
+      "bands": ["B04", "B03", "B02"],
+      "resolution_m": 10,
+      "scope": "all"
+    },
+    "water_extent": {
+      "source": "sentinel-2-global-mosaics",
+      "bands": ["B03", "B08"],
+      "formula": "(B03-B08)/(B03+B08)",
+      "resolution_m": 10,
+      "scope": "water-and-coast"
+    },
+    "vegetation": {
+      "source": "sentinel-2-global-mosaics",
+      "bands": ["B04", "B08"],
+      "formula": "(B08-B04)/(B08+B04)",
+      "resolution_m": 10,
+      "scope": "land-and-coast"
+    },
+    "chlorophyll": {
+      "source": "sentinel-3-olci-l2-wfr",
+      "resolution_m": 300,
+      "scope": "water"
+    },
+    "suspended_matter": {
+      "source": "sentinel-3-olci-l2-wfr",
+      "resolution_m": 300,
+      "scope": "water"
+    },
+    "oil_candidates": {
+      "source": "sentinel-1-grd",
+      "resolution_m": 20,
+      "scope": "water",
+      "warning": "Dark-spot screening only; wind, AIS and repeat acquisition are required."
+    }
+  }
+}

@@ -29,7 +29,7 @@ test("server-renders the Nautikos Caspian workspace", async () => {
   assert.doesNotMatch(html, /Your site is taking shape|Building your site/);
 });
 
-test("uses local deterministic imagery, optional AOI and server-side vision", async () => {
+test("uses the Jupyter data service, real annual products and AOI tools", async () => {
   const [component, processRoute, basemapRoute, trendRoute, aiRoute, server] = await Promise.all([
     readFile(new URL("../app/CaspianTwin.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/sentinel/process/route.ts", import.meta.url), "utf8"),
@@ -42,12 +42,17 @@ test("uses local deterministic imagery, optional AOI and server-side vision", as
   assert.match(component, /2020, 2021, 2022, 2023, 2024, 2025, 2026/);
   assert.match(component, /compare-divider/);
   assert.match(component, /compareEnabled/);
-  assert.match(component, /annualOverviewUrl/);
+  assert.match(component, /NEXT_PUBLIC_NAUTIKOS_DATA_URL/);
+  assert.match(component, /PRODUCT_BY_LAYER/);
   assert.match(component, /annualTileUrl/);
-  assert.match(component, /regionalBasemapTileUrl/);
-  assert.match(component, /monthlyOverviewUrl/);
+  assert.match(component, /\/v2\/tiles/);
+  assert.match(component, /exportAoiImage/);
+  assert.match(component, /\/v2\/aoi\/export/);
+  assert.match(component, /SOLUTIONS/);
   assert.match(component, /selection-rectangle/);
   assert.match(component, /type: "raster"/);
+  assert.doesNotMatch(component, /year === 2026[^\n]*2025/);
+  assert.doesNotMatch(component, /monthlyOverviewUrl/);
   assert.doesNotMatch(component, /GROQ_API_KEY/);
 
   assert.match(basemapRoute, /tiles.*basemap/s);

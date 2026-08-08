@@ -50,5 +50,7 @@ next-env.d.ts
 /.runtime-nautikos*.log
 /scripts/.ee-map-urls.json
 /scripts/.ee-monthly-urls.json
+/data/sentinel2-real/catalog-*.json
+/public/overviews/annual/*/true-color.raw-real.webp
 
 .env*
