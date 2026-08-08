@@ -80,7 +80,9 @@ class CatalogRenderer:
             settings.nautikos_data_root / "catalog" / "sentinel-2-earth-search",
             settings.nautikos_data_root / "catalog" / "sentinel-2-l3-quarterly",
         )
-        self.cache_root = settings.nautikos_data_root / "tiles"
+        # v3 deliberately starts with an empty namespace so no legacy demo
+        # pixels or failed mosaics can leak into the verified scene set.
+        self.cache_root = settings.nautikos_data_root / "tiles-v3"
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
         endpoint = settings.cdse_s3_endpoint.rstrip("/")

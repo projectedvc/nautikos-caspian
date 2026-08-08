@@ -148,7 +148,7 @@ def manifest() -> dict:
 def tile(product: str, year: int, z: str, x: str, y: str, extension: Literal["webp", "png", "jpg"]):
     if year not in YEARS or not PRODUCT_RE.fullmatch(product) or not all(TILE_RE.fullmatch(value) for value in (z, x, y)):
         raise HTTPException(status_code=400, detail="Invalid tile path")
-    path = settings.nautikos_data_root / "tiles" / product / str(year) / z / x / f"{y}.{extension}"
+    path = settings.nautikos_data_root / "tiles-v3" / product / str(year) / z / x / f"{y}.{extension}"
     if not path.is_file() and extension == "png" and product in SUPPORTED_PRODUCTS:
         try:
             path = renderer.render(product, year, int(z), int(x), int(y))
