@@ -1,12 +1,8 @@
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { PNG } from "pngjs";
 
 type BBox = [number, number, number, number];
 type TrendRequest = { bbox?: BBox };
 
-const LOCAL_DATA_ROOT = process.env.NAUTIKOS_DATA_DIR ?? "D:\\CaspianTwinData\\cube";
 const CASPIAN_BBOX: BBox = [46, 36, 55.8, 47.4];
 const YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026];
 const cache = new Map<string, unknown>();
@@ -32,12 +28,15 @@ function regression(points: Array<{ year: number; value: number }>, min: number,
   return { value: Math.max(min, Math.min(max, intercept + slope * 2027)), slope, r2 };
 }
 
-async function readMetrics(year: number, bbox: BBox) {
-  const bundled = path.join(process.cwd(), "public", "metrics", "annual", `${year}.png`);
-  const serverCopy = path.join(LOCAL_DATA_ROOT, "metrics", "annual", `${year}.png`);
-  const metricPath = existsSync(serverCopy) ? serverCopy : bundled;
-  const bytes = await readFile(metricPath);
-  const png = PNG.sync.read(bytes);
+async function readMetrics(year: number, bbox: BBox, requestUrl: string) {
+  // Public files are served by Vercel's static edge and are not guaranteed to
+  // exist inside the serverless function filesystem.  Reading them over the
+  // deployment origin keeps the spatial metric cube available both locally
+  // and in production without tracing the entire repository into the lambda.
+  const metricUrl = new URL(`/metrics/annual/${year}.png`, requestUrl);
+  const response = await fetch(metricUrl, { cache: "force-cache" });
+  if (!response.ok) throw new Error(`Metric ${year} is unavailable (${response.status})`);
+  const png = PNG.sync.read(Buffer.from(await response.arrayBuffer()));
   const [cw, cs, ce, cn] = CASPIAN_BBOX;
   const west = Math.max(cw, bbox[0]);
   const south = Math.max(cs, bbox[1]);
@@ -90,7 +89,7 @@ export async function POST(request: Request) {
   if (cached) return Response.json(cached, { headers: { "x-nautikos-cache": "HIT" } });
 
   try {
-    const series = await Promise.all(YEARS.map((year) => readMetrics(year, input.bbox as BBox)));
+    const series = await Promise.all(YEARS.map((year) => readMetrics(year, input.bbox as BBox, request.url)));
     const water = regression(series.map((point) => ({ year: point.year, value: point.waterShare })), 0, 1);
     const vegetation = regression(series.map((point) => ({ year: point.year, value: point.vegetation })), -1, 1);
     const soilStress = regression(series.map((point) => ({ year: point.year, value: point.soilStress })), 0, 1);

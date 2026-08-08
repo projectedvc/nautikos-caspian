@@ -419,9 +419,12 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
       type: "raster",
       source: "annual-filter-overview",
       minzoom: 3,
-      maxzoom: 8,
+      // At zoom 6 the fixed Sentinel COG tile takes over.  Keeping the
+      // overview alive above that point rendered two semi-transparent masks
+      // on top of each other and produced the heavy, misaligned colours.
+      maxzoom: 6,
       paint: {
-        "raster-opacity": layer === "shoreline" ? 0.92 : 0.72,
+        "raster-opacity": layer === "shoreline" ? 0.94 : 0.88,
         "raster-fade-duration": 0,
         "raster-resampling": "linear",
       },
@@ -440,7 +443,7 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
       source: "annual-filter-tiles",
       minzoom: 6,
       paint: {
-        "raster-opacity": layer === "shoreline" ? 0.92 : 0.72,
+        "raster-opacity": layer === "shoreline" ? 0.94 : 0.88,
         "raster-fade-duration": 0,
         "raster-resampling": "linear",
       },
@@ -499,7 +502,10 @@ export default function CaspianTwin() {
   const [mapsReady, setMapsReady] = useState(0);
   const [swipe, setSwipe] = useState(50);
   const [compareEnabled, setCompareEnabled] = useState(true);
-  const tileVersion = 25;
+  // Bump when a raster contract changes.  This is intentionally part of every
+  // overview and XYZ URL so browsers and the Vercel edge cannot keep an older
+  // mask after the rendering pipeline has been corrected.
+  const tileVersion = 26;
   const [timelapseFromYear, setTimelapseFromYear] = useState(2020);
   const [timelapseToYear, setTimelapseToYear] = useState(2026);
   const [timelapseYear, setTimelapseYear] = useState(2020);
