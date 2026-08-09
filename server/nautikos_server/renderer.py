@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import boto3
 import numpy as np
 import rasterio
-from PIL import Image
+from PIL import Image, ImageFilter
 from rasterio.enums import Resampling
 from rasterio.transform import from_bounds
 from rasterio.vrt import WarpedVRT
@@ -147,7 +147,7 @@ class CatalogRenderer:
         raise FileNotFoundError(f"Sentinel-1 catalogue is not built for {year}")
 
     def cache_path(self, product: str, year: int, z: int, x: int, y: int) -> Path:
-        cache_product = "oil_candidates-v2" if product == "oil_candidates" else product
+        cache_product = "oil_candidates-v3" if product == "oil_candidates" else product
         return self.cache_root / cache_product / str(year) / str(z) / str(x) / f"{y}.png"
 
     def spectral_cache_path(self, year: int, z: int, x: int, y: int) -> Path:
@@ -445,6 +445,20 @@ class CatalogRenderer:
         # A weak response is commonly caused by speckle or acquisition seams.
         # Only the upper coherent tail is exposed to the incident workflow.
         candidate = water & (score > 0.48)
+        # Remove thin scan/speckle traces. Operational slick candidates must
+        # form a spatially coherent patch at the current map scale, not a
+        # one-pixel line. The larger dilation restores the footprint after
+        # erosion, while the small tile rim avoids convolution edge echoes.
+        opened = (
+            Image.fromarray(candidate.astype(np.uint8) * 255, "L")
+            .filter(ImageFilter.MinFilter(5))
+            .filter(ImageFilter.MaxFilter(9))
+        )
+        candidate &= np.asarray(opened) > 0
+        candidate[:6, :] = False
+        candidate[-6:, :] = False
+        candidate[:, :6] = False
+        candidate[:, -6:] = False
         rgba[..., 0] = (238 + score * 17).astype(np.uint8)
         rgba[..., 1] = (178 - score * 112).astype(np.uint8)
         rgba[..., 2] = (45 + score * 20).astype(np.uint8)
