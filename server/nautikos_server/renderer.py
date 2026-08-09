@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import boto3
 import numpy as np
 import rasterio
-from PIL import Image, ImageFilter
+from PIL import Image
 from rasterio.enums import Resampling
 from rasterio.transform import from_bounds
 from rasterio.vrt import WarpedVRT
@@ -82,6 +82,21 @@ def ramp(
     )
 
 
+def gaussian_smooth(values: np.ndarray, sigma: float) -> np.ndarray:
+    """Small dependency-free float Gaussian for 256 px analytical tiles."""
+    radius = max(1, int(round(sigma * 3)))
+    coordinates = np.arange(-radius, radius + 1, dtype=np.float32)
+    kernel = np.exp(-(coordinates * coordinates) / (2.0 * sigma * sigma))
+    kernel /= kernel.sum()
+
+    def convolve_line(line: np.ndarray) -> np.ndarray:
+        padded = np.pad(line, radius, mode="reflect")
+        return np.convolve(padded, kernel, mode="valid")
+
+    horizontal = np.apply_along_axis(convolve_line, 1, values)
+    return np.apply_along_axis(convolve_line, 0, horizontal).astype(np.float32)
+
+
 class CatalogRenderer:
     """Render immutable XYZ tiles from the public ESA Sentinel-2 L2A COG archive.
 
@@ -132,7 +147,8 @@ class CatalogRenderer:
         raise FileNotFoundError(f"Sentinel-1 catalogue is not built for {year}")
 
     def cache_path(self, product: str, year: int, z: int, x: int, y: int) -> Path:
-        return self.cache_root / product / str(year) / str(z) / str(x) / f"{y}.png"
+        cache_product = "oil_candidates-v2" if product == "oil_candidates" else product
+        return self.cache_root / cache_product / str(year) / str(z) / str(x) / f"{y}.png"
 
     def spectral_cache_path(self, year: int, z: int, x: int, y: int) -> Path:
         """One reflectance mosaic shared by every Sentinel-2 product.
@@ -421,22 +437,18 @@ class CatalogRenderer:
         # without adding another server dependency.
         finite_fill = float(np.median(radar[water]))
         filled = np.where(radar_valid, radar, finite_fill)
-        display_low, display_high = np.percentile(filled[radar_valid], (1, 99))
-        normalized = np.clip((filled - display_low) * (255.0 / max(display_high - display_low, 1e-4)), 0, 255).astype(np.uint8)
-        # Pillow's Gaussian blur is defined for 8-bit L/RGB images, not mode F.
-        # Relative contrast is all this detector needs, so normalize the dB
-        # window once and blur the deterministic luminance representation.
-        luminance = Image.fromarray(normalized, "L")
-        fine = np.asarray(luminance.filter(ImageFilter.GaussianBlur(1.4)), dtype=np.float32)
-        background = np.asarray(luminance.filter(ImageFilter.GaussianBlur(7.0)), dtype=np.float32)
+        fine = gaussian_smooth(filled, 1.4)
+        background = gaussian_smooth(filled, 7.0)
         dark = np.clip(background - fine, 0, None)
-        low, high = np.percentile(dark[water], (65, 98))
+        low, high = np.percentile(dark[water], (82, 99.5))
         score = np.clip((dark - low) / max(high - low, 1e-4), 0, 1)
-        candidate = water & (score > 0.18)
+        # A weak response is commonly caused by speckle or acquisition seams.
+        # Only the upper coherent tail is exposed to the incident workflow.
+        candidate = water & (score > 0.48)
         rgba[..., 0] = (238 + score * 17).astype(np.uint8)
         rgba[..., 1] = (178 - score * 112).astype(np.uint8)
         rgba[..., 2] = (45 + score * 20).astype(np.uint8)
-        rgba[..., 3] = np.where(candidate, 65 + score * 175, 0).astype(np.uint8)
+        rgba[..., 3] = np.where(candidate, 45 + score * 195, 0).astype(np.uint8)
         return rgba
 
     def _rgba(self, product: str, arrays: dict[str, np.ndarray], valid: np.ndarray) -> np.ndarray:
