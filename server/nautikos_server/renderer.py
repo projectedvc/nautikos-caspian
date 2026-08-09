@@ -147,7 +147,7 @@ class CatalogRenderer:
         raise FileNotFoundError(f"Sentinel-1 catalogue is not built for {year}")
 
     def cache_path(self, product: str, year: int, z: int, x: int, y: int) -> Path:
-        cache_product = "oil_candidates-v3" if product == "oil_candidates" else product
+        cache_product = "oil_candidates-v4" if product == "oil_candidates" else product
         return self.cache_root / cache_product / str(year) / str(z) / str(x) / f"{y}.png"
 
     def spectral_cache_path(self, year: int, z: int, x: int, y: int) -> Path:
@@ -455,10 +455,10 @@ class CatalogRenderer:
             .filter(ImageFilter.MaxFilter(9))
         )
         candidate &= np.asarray(opened) > 0
-        candidate[:6, :] = False
-        candidate[-6:, :] = False
-        candidate[:, :6] = False
-        candidate[:, -6:] = False
+        candidate[:12, :] = False
+        candidate[-12:, :] = False
+        candidate[:, :12] = False
+        candidate[:, -12:] = False
         rgba[..., 0] = (238 + score * 17).astype(np.uint8)
         rgba[..., 1] = (178 - score * 112).astype(np.uint8)
         rgba[..., 2] = (45 + score * 20).astype(np.uint8)
