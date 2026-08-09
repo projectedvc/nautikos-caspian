@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import boto3
 import numpy as np
 import rasterio
-from PIL import Image
+from PIL import Image, ImageFilter
 from rasterio.enums import Resampling
 from rasterio.transform import from_bounds
 from rasterio.vrt import WarpedVRT
@@ -30,6 +30,7 @@ SUPPORTED_PRODUCTS = {
     "suspended_matter",
     "vegetation",
     "soil_stress",
+    "oil_candidates",
 }
 
 
@@ -82,6 +83,10 @@ class CatalogRenderer:
             settings.nautikos_data_root / "catalog" / "sentinel-2-earth-search",
             settings.nautikos_data_root / "catalog" / "sentinel-2-l3-quarterly",
         )
+        self.radar_catalog_roots = (
+            settings.nautikos_data_root / "catalog" / "sentinel-1-earth-search",
+            Path(__file__).resolve().parents[1] / "seed-data" / "catalog" / "sentinel-1-earth-search",
+        )
         # v4 invalidates legacy TCI-based tiles. Those files used independent
         # per-scene display stretches and caused the dark vertical strips that
         # were visible in the previous deployment.
@@ -105,8 +110,26 @@ class CatalogRenderer:
                 return json.loads(path.read_text(encoding="utf-8"))
         raise FileNotFoundError(f"catalog is not built for {year}")
 
+    @lru_cache(maxsize=14)
+    def radar_catalog(self, year: int) -> dict:
+        for root in self.radar_catalog_roots:
+            path = root / f"{year}.json"
+            if path.is_file():
+                return json.loads(path.read_text(encoding="utf-8"))
+        raise FileNotFoundError(f"Sentinel-1 catalogue is not built for {year}")
+
     def cache_path(self, product: str, year: int, z: int, x: int, y: int) -> Path:
         return self.cache_root / product / str(year) / str(z) / str(x) / f"{y}.png"
+
+    def spectral_cache_path(self, year: int, z: int, x: int, y: int) -> Path:
+        """One reflectance mosaic shared by every Sentinel-2 product.
+
+        Reading the same COGs again for RGB, NDWI, turbidity, vegetation and
+        soil made a single map position take minutes.  The first request now
+        writes one compact spectral tile; every other filter for that year and
+        position is then a local array operation.
+        """
+        return self.settings.nautikos_data_root / "spectral-v1" / str(year) / str(z) / str(x) / f"{y}.npz"
 
     def _lock(self, key: str) -> threading.Lock:
         with self._locks_guard:
@@ -123,9 +146,24 @@ class CatalogRenderer:
         url = asset.get("href")
         if not url or url.startswith("s3://"):
             return self.signed_url(asset["bucket"], asset["key"])
+        local = self._local_asset_path(asset)
+        return str(local) if local and local.is_file() else url
+
+    def _local_asset_path(self, asset: dict) -> Path | None:
+        url = asset.get("href")
+        if not url or not url.startswith("http"):
+            return None
         suffix = Path(urlparse(url).path).suffix or ".tif"
-        local = self.settings.nautikos_data_root / "raw" / "earth-search" / "assets" / f"{hashlib.sha256(url.encode()).hexdigest()}{suffix}"
-        return str(local) if local.is_file() else url
+        return self.settings.nautikos_data_root / "raw" / "earth-search" / "assets" / f"{hashlib.sha256(url.encode()).hexdigest()}{suffix}"
+
+    def _item_is_local(self, item: dict) -> bool:
+        assets = item.get("assets", {})
+        for name in ("B02", "B03", "B04", "B08", "scl"):
+            asset = assets.get(name)
+            local = self._local_asset_path(asset) if asset else None
+            if local is None or not local.is_file():
+                return False
+        return True
 
     def _read_asset(
         self,
@@ -248,6 +286,130 @@ class CatalogRenderer:
         denominator = np.maximum(counts, 1)
         return {band: (values / denominator).astype(np.float32) for band, values in sums.items()}, valid
 
+    def _spectral_mosaic(
+        self,
+        year: int,
+        z: int,
+        x: int,
+        y: int,
+        items: list[dict],
+        bounds: tuple[float, float, float, float],
+    ) -> tuple[dict[str, np.ndarray], np.ndarray]:
+        cache = self.spectral_cache_path(year, z, x, y)
+        if cache.is_file():
+            with np.load(cache) as stored:
+                arrays = {name: stored[name] for name in ("B02", "B03", "B04", "B08")}
+                valid = stored["valid"].astype(bool)
+            return arrays, valid
+
+        cache_key = f"spectral/{year}/{z}/{x}/{y}"
+        with self._lock(cache_key):
+            if cache.is_file():
+                with np.load(cache) as stored:
+                    arrays = {name: stored[name] for name in ("B02", "B03", "B04", "B08")}
+                    valid = stored["valid"].astype(bool)
+                return arrays, valid
+
+            # A whole-Caspian low-zoom tile can intersect hundreds of scenes.
+            # Three dates per MGRS grid are valuable near the coast, but at an
+            # overview zoom they triple IO without adding visible detail. Use
+            # the least-cloudy fixed scene per grid there; detailed zooms keep
+            # all three acquisitions for cloud-gap filling.
+            if z <= 7:
+                grouped: dict[str, list[dict]] = {}
+                for item in items:
+                    grouped.setdefault(str(item.get("grid") or item.get("id")), []).append(item)
+                # Prefer an already-local acquisition for every footprint.
+                # This keeps presentation requests independent from the long
+                # archive download while retaining one real Sentinel scene per
+                # grid. Only a not-yet-local grid falls back to a remote COG.
+                items = [next((item for item in group if self._item_is_local(item)), group[0]) for group in grouped.values()]
+            else:
+                local_items = [item for item in items if self._item_is_local(item)]
+                if local_items:
+                    items = local_items
+
+            arrays, valid = self._mosaic(items, ("B02", "B03", "B04", "B08"), bounds)
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            temporary = cache.with_suffix(f".{threading.get_ident()}.tmp.npz")
+            np.savez_compressed(temporary, **arrays, valid=valid.astype(np.uint8))
+            temporary.replace(cache)
+            return arrays, valid
+
+    def _radar_mosaic(
+        self,
+        items: list[dict],
+        bounds: tuple[float, float, float, float],
+    ) -> tuple[np.ndarray, np.ndarray]:
+        def read_item(item: dict) -> np.ma.MaskedArray:
+            return self._read_asset(item["assets"]["vv"], bounds, Resampling.bilinear)
+
+        measurements: list[np.ndarray] = []
+        workers = min(8, max(1, len(items)))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="nautikos-sar") as pool:
+            futures = [pool.submit(read_item, item) for item in items]
+            for future in as_completed(futures):
+                measurement = future.result()
+                raw = measurement.data.astype(np.float32)
+                good = ~np.ma.getmaskarray(measurement) & np.isfinite(raw) & (raw > 0)
+                calibrated_relative = np.full(raw.shape, np.nan, dtype=np.float32)
+                # Earth Search exposes the original GRD amplitude COG. For
+                # screening we use relative dB inside one acquisition; the
+                # layer is deliberately labelled as a candidate, never a
+                # measured oil concentration.
+                calibrated_relative[good] = 20.0 * np.log10(np.maximum(raw[good], 1e-6))
+                measurements.append(calibrated_relative)
+        if not measurements:
+            return np.zeros((TILE_SIZE, TILE_SIZE), dtype=np.float32), np.zeros((TILE_SIZE, TILE_SIZE), dtype=bool)
+        stack = np.stack(measurements)
+        valid = np.any(np.isfinite(stack), axis=0)
+        with np.errstate(all="ignore"):
+            mosaic = np.nanmedian(stack, axis=0)
+        return np.nan_to_num(mosaic, nan=0.0), valid
+
+    def _oil_candidates(
+        self,
+        year: int,
+        z: int,
+        x: int,
+        y: int,
+        bounds: tuple[float, float, float, float],
+        spectral: dict[str, np.ndarray],
+        spectral_valid: np.ndarray,
+    ) -> np.ndarray:
+        geographic = transform_bounds("EPSG:3857", "EPSG:4326", *bounds, densify_pts=21)
+        radar_items = [
+            item
+            for item in self.radar_catalog(year)["items"]
+            if item.get("bbox") and intersects(item["bbox"], geographic)
+        ]
+        if not radar_items:
+            raise FileNotFoundError("no fixed Sentinel-1 scene intersects this tile")
+        radar, radar_valid = self._radar_mosaic(radar_items, bounds)
+        green, nir = spectral["B03"], spectral["B08"]
+        water = spectral_valid & radar_valid & (((green - nir) / (green + nir + 1e-6)) > -0.02)
+        rgba = np.zeros((TILE_SIZE, TILE_SIZE, 4), dtype=np.uint8)
+        if np.count_nonzero(water) < 32:
+            return rgba
+
+        # Oil dampens centimetre-scale surface waves. Compare each pixel with
+        # a broad local SAR background; only unusually dark, coherent water
+        # patches receive alpha. PIL supplies deterministic local smoothing
+        # without adding another server dependency.
+        finite_fill = float(np.median(radar[water]))
+        filled = np.where(radar_valid, radar, finite_fill)
+        fine = np.asarray(Image.fromarray(filled, "F").filter(ImageFilter.GaussianBlur(1.4)), dtype=np.float32)
+        background = np.asarray(Image.fromarray(filled, "F").filter(ImageFilter.GaussianBlur(7.0)), dtype=np.float32)
+        dark = np.clip(background - fine, 0, None)
+        low, high = np.percentile(dark[water], (65, 98))
+        score = np.clip((dark - low) / max(high - low, 1e-4), 0, 1)
+        candidate = water & (score > 0.18)
+        rgba[..., 0] = (238 + score * 17).astype(np.uint8)
+        rgba[..., 1] = (178 - score * 112).astype(np.uint8)
+        rgba[..., 2] = (45 + score * 20).astype(np.uint8)
+        rgba[..., 3] = np.where(candidate, 65 + score * 175, 0).astype(np.uint8)
+        return rgba
+
     def _rgba(self, product: str, arrays: dict[str, np.ndarray], valid: np.ndarray) -> np.ndarray:
         blue = arrays.get("B02")
         green = arrays.get("B03")
@@ -318,22 +480,15 @@ class CatalogRenderer:
             items = [item for item in catalog["items"] if item.get("bbox") and intersects(item["bbox"], geographic)]
             if not items:
                 raise FileNotFoundError("tile does not intersect the fixed scene set")
-            if product == "rgb":
-                # TCI files contain scene-specific display stretches. Mixing
-                # them creates visible stripes even when every source pixel is
-                # valid. Raw reflectance plus one fixed stretch gives every
-                # MGRS acquisition the same radiometry.
-                bands = ("B04", "B03", "B02")
-            elif product in {"water_colour"}:
-                bands = ("B04", "B03", "B02", "B08")
-            elif product in {"water_extent"}:
-                bands = ("B03", "B08")
-            elif product in {"turbidity", "suspended_matter"}:
-                bands = ("B04", "B03", "B08")
-            else:
-                bands = ("B04", "B03", "B08")
-            arrays, valid = self._mosaic(items, bands, bounds)
-            rgba = self._rgba(product, arrays, valid)
+            # All products share one raw-reflectance mosaic. TCI files are not
+            # used because their independent per-scene display stretches are
+            # the source of visible dark/bright strips.
+            arrays, valid = self._spectral_mosaic(year, z, x, y, items, bounds)
+            rgba = (
+                self._oil_candidates(year, z, x, y, bounds, arrays, valid)
+                if product == "oil_candidates"
+                else self._rgba(product, arrays, valid)
+            )
             destination.parent.mkdir(parents=True, exist_ok=True)
             temporary = destination.with_suffix(f".{threading.get_ident()}.tmp")
             Image.fromarray(rgba, "RGBA").save(temporary, format="PNG", optimize=True)

@@ -72,6 +72,7 @@ def main() -> None:
     parser.add_argument("--years", type=parse_years, default=parse_years("2020:2026"))
     parser.add_argument("--assets", default=",".join(DEFAULT_ASSETS))
     parser.add_argument("--catalog-root", type=Path, default=Path("server/seed-data/catalog/sentinel-2-earth-search"))
+    parser.add_argument("--catalog-name", default="sentinel-2-earth-search")
     parser.add_argument("--data-root", type=Path, default=Path(os.environ.get("NAUTIKOS_DATA_ROOT", "/home/jovyan/work/caspiansea/data-v2")))
     parser.add_argument("--workers", type=int, default=3)
     args = parser.parse_args()
@@ -84,7 +85,7 @@ def main() -> None:
         # The API reads its immutable catalogue from the data root. Keep that
         # copy synchronized with the exact scene set being downloaded so a
         # restart can never combine new assets with an older year manifest.
-        local_catalogue = args.data_root / "catalog" / "sentinel-2-earth-search" / f"{year}.json"
+        local_catalogue = args.data_root / "catalog" / args.catalog_name / f"{year}.json"
         local_catalogue.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_catalogue, local_catalogue)
         for item in catalogue["items"]:

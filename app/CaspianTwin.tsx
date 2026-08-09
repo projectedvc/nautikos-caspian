@@ -74,7 +74,7 @@ const CASPIAN_BBOX: BBox = [46.0, 36.0, 55.8, 47.4];
 const REGIONAL_BASEMAP_BBOX: BBox = [25, 25, 75, 60];
 const YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
 const DATA_API_BASE = (process.env.NEXT_PUBLIC_NAUTIKOS_DATA_URL ?? "").replace(/\/$/, "");
-const WATER_FILTERS: ViewKey[] = ["optical", "waterOptical", "water", "suspendedMatter", "shoreline"];
+const WATER_FILTERS: ViewKey[] = ["optical", "waterOptical", "water", "suspendedMatter", "oil", "shoreline"];
 const LAND_FILTERS: ViewKey[] = ["optical", "shoreline", "vegetation", "soil"];
 const PRODUCT_BY_LAYER: Record<LayerKey, string> = {
   "true-color": "rgb",
@@ -226,15 +226,15 @@ const allFilters: FilterDefinition[] = [
     dataset: "s1",
     layer: "oil-roughness",
     icon: Radar,
-    legend: [{ color: "#081722", label: "гладкая поверхность" }, { color: "#2bb9ef", label: "шероховатая вода" }],
+    legend: [{ color: "#efb22d", label: "SAR-кандидат" }, { color: "#e84535", label: "высокий приоритет проверки" }],
     explanation: "SAR выделяет тёмные формации на воде при облаках и ночью. Для тревоги кандидат проверяется по ветру, AIS и повторному пролёту.",
   },
 ];
 
-// The MVP exposes only layers that are backed by the fixed Sentinel-2 L3
-// scene set on the Jupyter server. Unsupported thermal/SAR/OLCI claims are not
-// shown as buttons until their independent products are ingested.
-const SUPPORTED_FILTERS = new Set<ViewKey>(["optical", "waterOptical", "shoreline", "water", "suspendedMatter", "vegetation", "soil"]);
+// Only independently reproducible local products are shown. Sentinel-3
+// chlorophyll/TSM will be enabled after its L2 WATER archive is ingested;
+// Sentinel-1 oil-candidate screening is already backed by a fixed SAR set.
+const SUPPORTED_FILTERS = new Set<ViewKey>(["optical", "waterOptical", "shoreline", "water", "suspendedMatter", "oil", "vegetation", "soil"]);
 const FILTER_COPY: Partial<Record<ViewKey, Pick<FilterDefinition, "label" | "subtitle" | "explanation">>> = {
   optical: {
     label: "Реальный снимок Каспия",
@@ -260,6 +260,11 @@ const FILTER_COPY: Partial<Record<ViewKey, Pick<FilterDefinition, "label" | "sub
     label: "Взвесь в воде",
     subtitle: "Sentinel‑2 L2A · Red/Green · июль · 10 м",
     explanation: "Относительный сигнал взвешенного вещества рассчитан из согласованных красного и зелёного каналов. Это сравнительный приоритет для обследования, а не лабораторная концентрация.",
+  },
+  oil: {
+    label: "Кандидаты нефтяной плёнки",
+    subtitle: "Sentinel‑1 GRD SAR · тёмные пятна · июль · 10/20 м",
+    explanation: "Радар выделяет участки, где поверхность воды стала необычно гладкой относительно локального фона. Это рабочий кандидат: платформа должна сверить форму пятна с ветром, судами/AIS, нефтяной инфраструктурой и повторным пролётом, затем направить точку на полевую проверку.",
   },
   vegetation: {
     label: "Растительность побережья",
