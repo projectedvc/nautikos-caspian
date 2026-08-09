@@ -421,14 +421,35 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
   }, "place-labels");
 
   if (layer !== "true-color") {
-    // Analytical products are always XYZ tiles. A stretched full-frame image
-    // cannot share MapLibre's exact tile grid at every zoom and was the source
-    // of shifted, oversized overlays in the previous build.
+    const hasAlignedOverview = ["olci-true-color", "water-quality", "suspended-matter", "shoreline"].includes(layer);
+    // SAR oil screening is meaningful only on a local scale. Do not launch a
+    // basin-wide cold render that will time out and leave an apparently broken
+    // filter; MapLibre requests it as soon as the user zooms into the coast.
+    const detailOnly = layer === "oil-roughness";
+    const nativeMinzoom = hasAlignedOverview || detailOnly ? 7 : 3;
+    if (hasAlignedOverview) {
+      map.addSource("annual-filter-overview", {
+        type: "image",
+        url: annualOverviewUrl(year, layer, version),
+        coordinates: overviewCoordinates(),
+      });
+      map.addLayer({
+        id: "annual-filter-overview",
+        type: "raster",
+        source: "annual-filter-overview",
+        minzoom: 3,
+        maxzoom: 7,
+        paint: { "raster-opacity": 1, "raster-fade-duration": 0, "raster-resampling": "linear" },
+      }, "place-labels");
+    }
+
+    // At native zoom the same filter switches to raw-reflectance XYZ tiles.
+    // Both products use the identical Caspian bbox and annual frame.
     map.addSource("annual-filter-tiles", {
       type: "raster",
       tiles: [annualTileUrl(year, layer, version)],
       tileSize: 256,
-      minzoom: 3,
+      minzoom: nativeMinzoom,
       maxzoom: layer === "olci-true-color" || layer === "chlorophyll" || layer === "suspended-matter" ? 11 : 14,
       bounds: CASPIAN_BBOX,
     });
@@ -436,7 +457,7 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
       id: "annual-filter-tiles",
       type: "raster",
       source: "annual-filter-tiles",
-      minzoom: 3,
+      minzoom: nativeMinzoom,
       paint: {
         // Opacity is encoded once in the PNG alpha channel. Applying a second
         // layer opacity washes the palette out and exposes rectangular seams.
