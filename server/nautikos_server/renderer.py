@@ -54,17 +54,30 @@ def stretch(values: np.ndarray, low: float = 150.0, high: float = 3200.0) -> np.
     return np.clip((values - low) * (255.0 / (high - low)), 0, 255).astype(np.uint8)
 
 
-def ramp(values: np.ndarray, valid: np.ndarray, low: float, high: float, alpha: int = 205) -> np.ndarray:
+def ramp(
+    values: np.ndarray,
+    valid: np.ndarray,
+    low: float,
+    high: float,
+    alpha: int = 205,
+    anomaly_only: bool = False,
+) -> np.ndarray:
     scaled = np.clip((values - low) / max(high - low, 1e-6), 0, 1)
     red = np.clip(2.2 * scaled - 0.25, 0, 1)
     green = np.clip(1.35 - np.abs(scaled - 0.5) * 2.3, 0, 1)
     blue = np.clip(1.15 - 2.0 * scaled, 0, 1)
+    if anomaly_only:
+        # Keep the photographic scene readable. Low/background values are
+        # almost transparent; only increasingly unusual values become vivid.
+        opacity = np.where(valid & (scaled > 0.08), 28 + scaled * (alpha - 28), 0)
+    else:
+        opacity = valid.astype(np.uint8) * alpha
     return np.dstack(
         [
             (red * 255).astype(np.uint8),
             (green * 255).astype(np.uint8),
             (blue * 255).astype(np.uint8),
-            valid.astype(np.uint8) * alpha,
+            opacity.astype(np.uint8),
         ]
     )
 
@@ -90,7 +103,7 @@ class CatalogRenderer:
         # v4 invalidates legacy TCI-based tiles. Those files used independent
         # per-scene display stretches and caused the dark vertical strips that
         # were visible in the previous deployment.
-        self.cache_root = settings.nautikos_data_root / "tiles-v4"
+        self.cache_root = settings.nautikos_data_root / "tiles-v5"
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
         endpoint = settings.cdse_s3_endpoint.rstrip("/")
@@ -129,7 +142,7 @@ class CatalogRenderer:
         writes one compact spectral tile; every other filter for that year and
         position is then a local array operation.
         """
-        return self.settings.nautikos_data_root / "spectral-v1" / str(year) / str(z) / str(x) / f"{y}.npz"
+        return self.settings.nautikos_data_root / "spectral-v2" / str(year) / str(z) / str(x) / f"{y}.npz"
 
     def _lock(self, key: str) -> threading.Lock:
         with self._locks_guard:
@@ -236,9 +249,11 @@ class CatalogRenderer:
         items: list[dict],
         bands: tuple[str, ...],
         bounds: tuple[float, float, float, float],
-    ) -> tuple[dict[str, np.ndarray], np.ndarray]:
+    ) -> tuple[dict[str, np.ndarray], np.ndarray, np.ndarray]:
         sums = {band: np.zeros((TILE_SIZE, TILE_SIZE), dtype=np.float64) for band in bands}
         counts = np.zeros((TILE_SIZE, TILE_SIZE), dtype=np.uint16)
+        water_votes = np.zeros((TILE_SIZE, TILE_SIZE), dtype=np.uint16)
+        scl_votes = np.zeros((TILE_SIZE, TILE_SIZE), dtype=np.uint16)
         def read_item(item: dict) -> tuple[dict[str, np.ma.MaskedArray], np.ma.MaskedArray | None]:
             arrays: dict[str, np.ma.MaskedArray] = {}
             grouped: dict[tuple[str, str, str], list[tuple[str, int, dict]]] = {}
@@ -280,11 +295,16 @@ class CatalogRenderer:
                 if not np.any(valid):
                     continue
                 counts[valid] += 1
+                if scl is not None:
+                    scl_valid = valid & ~np.ma.getmaskarray(scl)
+                    scl_votes[scl_valid] += 1
+                    water_votes[scl_valid & (scl.data.astype(np.uint8) == 6)] += 1
                 for band, array in arrays.items():
                     sums[band][valid] += array.data[valid]
         valid = counts > 0
         denominator = np.maximum(counts, 1)
-        return {band: (values / denominator).astype(np.float32) for band, values in sums.items()}, valid
+        water_probability = water_votes.astype(np.float32) / np.maximum(scl_votes, 1)
+        return {band: (values / denominator).astype(np.float32) for band, values in sums.items()}, valid, water_probability
 
     def _spectral_mosaic(
         self,
@@ -298,7 +318,7 @@ class CatalogRenderer:
         cache = self.spectral_cache_path(year, z, x, y)
         if cache.is_file():
             with np.load(cache) as stored:
-                arrays = {name: stored[name] for name in ("B02", "B03", "B04", "B08")}
+                arrays = {name: stored[name] for name in ("B02", "B03", "B04", "B08", "water_probability")}
                 valid = stored["valid"].astype(bool)
             return arrays, valid
 
@@ -306,7 +326,7 @@ class CatalogRenderer:
         with self._lock(cache_key):
             if cache.is_file():
                 with np.load(cache) as stored:
-                    arrays = {name: stored[name] for name in ("B02", "B03", "B04", "B08")}
+                    arrays = {name: stored[name] for name in ("B02", "B03", "B04", "B08", "water_probability")}
                     valid = stored["valid"].astype(bool)
                 return arrays, valid
 
@@ -329,7 +349,8 @@ class CatalogRenderer:
                 if local_items:
                     items = local_items
 
-            arrays, valid = self._mosaic(items, ("B02", "B03", "B04", "B08"), bounds)
+            arrays, valid, water_probability = self._mosaic(items, ("B02", "B03", "B04", "B08"), bounds)
+            arrays["water_probability"] = water_probability
             cache.parent.mkdir(parents=True, exist_ok=True)
             temporary = cache.with_suffix(f".{threading.get_ident()}.tmp.npz")
             np.savez_compressed(temporary, **arrays, valid=valid.astype(np.uint8))
@@ -387,7 +408,9 @@ class CatalogRenderer:
             raise FileNotFoundError("no fixed Sentinel-1 scene intersects this tile")
         radar, radar_valid = self._radar_mosaic(radar_items, bounds)
         green, nir = spectral["B03"], spectral["B08"]
-        water = spectral_valid & radar_valid & (((green - nir) / (green + nir + 1e-6)) > -0.02)
+        ndwi = (green - nir) / (green + nir + 1e-6)
+        scl_water = spectral.get("water_probability", np.zeros_like(ndwi)) >= 0.5
+        water = spectral_valid & radar_valid & (scl_water | ((ndwi > 0.08) & (nir < 1800)))
         rgba = np.zeros((TILE_SIZE, TILE_SIZE, 4), dtype=np.uint8)
         if np.count_nonzero(water) < 32:
             return rgba
@@ -430,7 +453,11 @@ class CatalogRenderer:
 
         epsilon = 1e-6
         ndwi = (green - nir) / (green + nir + epsilon)
-        water = valid & (ndwi > -0.05)
+        # SCL class 6 is the primary water decision. A conservative NDWI/NIR
+        # fallback retains shallow and sediment-rich coastal water that SCL can
+        # label as bare surface. Bright desert is explicitly excluded.
+        scl_water = arrays.get("water_probability", np.zeros_like(ndwi)) >= 0.5
+        water = valid & (scl_water | ((ndwi > 0.08) & (nir < 1800)))
         if product == "water_colour":
             return np.dstack([stretch(red), stretch(green), stretch(blue), water.astype(np.uint8) * 235])
         if product == "water_extent":
@@ -443,10 +470,10 @@ class CatalogRenderer:
             return rgba
         if product == "turbidity":
             ndti = (red - green) / (red + green + epsilon)
-            return ramp(ndti, water, -0.12, 0.22)
+            return ramp(ndti, water, -0.12, 0.22, anomaly_only=True)
         if product == "suspended_matter":
             red_ratio = red / (green + epsilon)
-            return ramp(red_ratio, water, 0.55, 1.35)
+            return ramp(red_ratio, water, 0.55, 1.35, anomaly_only=True)
         if product == "vegetation":
             ndvi = (nir - red) / (nir + red + epsilon)
             land = valid & ~water & (ndvi > 0.05)
