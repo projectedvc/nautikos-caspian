@@ -74,7 +74,7 @@ const CASPIAN_BBOX: BBox = [46.0, 36.0, 55.8, 47.4];
 const REGIONAL_BASEMAP_BBOX: BBox = [25, 25, 75, 60];
 const YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
 const DATA_API_BASE = (process.env.NEXT_PUBLIC_NAUTIKOS_DATA_URL ?? "").replace(/\/$/, "");
-const WATER_FILTERS: ViewKey[] = ["optical", "waterOptical", "water", "suspendedMatter", "oil", "shoreline"];
+const WATER_FILTERS: ViewKey[] = ["optical", "waterOptical", "water", "suspendedMatter", "chlorophyll", "oil", "shoreline"];
 const LAND_FILTERS: ViewKey[] = ["optical", "shoreline", "vegetation", "soil"];
 const PRODUCT_BY_LAYER: Record<LayerKey, string> = {
   "true-color": "rgb",
@@ -234,7 +234,7 @@ const allFilters: FilterDefinition[] = [
 // Only independently reproducible local products are shown. Sentinel-3
 // chlorophyll/TSM will be enabled after its L2 WATER archive is ingested;
 // Sentinel-1 oil-candidate screening is already backed by a fixed SAR set.
-const SUPPORTED_FILTERS = new Set<ViewKey>(["optical", "waterOptical", "shoreline", "water", "suspendedMatter", "oil", "vegetation", "soil"]);
+const SUPPORTED_FILTERS = new Set<ViewKey>(["optical", "waterOptical", "shoreline", "water", "suspendedMatter", "chlorophyll", "oil", "vegetation", "soil"]);
 const FILTER_COPY: Partial<Record<ViewKey, Pick<FilterDefinition, "label" | "subtitle" | "explanation">>> = {
   optical: {
     label: "Реальный снимок Каспия",
@@ -260,6 +260,11 @@ const FILTER_COPY: Partial<Record<ViewKey, Pick<FilterDefinition, "label" | "sub
     label: "Взвесь в воде",
     subtitle: "Sentinel‑2 L2A · Red/Green · июль · 10 м",
     explanation: "Относительный сигнал взвешенного вещества рассчитан из согласованных красного и зелёного каналов. Это сравнительный приоритет для обследования, а не лабораторная концентрация.",
+  },
+  chlorophyll: {
+    label: "Скрининг цветения воды",
+    subtitle: "Sentinel‑2 L2A · Green/Red/Blue proxy · июль · 10 м",
+    explanation: "Непрерывная шкала показывает относительный избыток зелёного сигнала внутри маски воды. Жёлтые и красные зоны — приоритет повторной проверки на цветение; это оптический скрининг, а не лабораторная концентрация хлорофилла.",
   },
   oil: {
     label: "Кандидаты нефтяной плёнки",
@@ -421,7 +426,7 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
   }, "place-labels");
 
   if (layer !== "true-color") {
-    const hasAlignedOverview = ["olci-true-color", "water-quality", "suspended-matter", "shoreline"].includes(layer);
+    const hasAlignedOverview = ["olci-true-color", "water-quality", "suspended-matter", "chlorophyll", "shoreline"].includes(layer);
     // SAR oil screening is meaningful only on a local scale. Do not launch a
     // basin-wide cold render that will time out and leave an apparently broken
     // filter; MapLibre requests it as soon as the user zooms into the coast.

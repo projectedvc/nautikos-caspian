@@ -18,12 +18,40 @@ ROOT = Path(__file__).resolve().parents[1] / "public" / "overviews" / "annual"
 WIDTH = 2048
 
 
-def colour_ramp(score: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    red = np.clip(2.2 * score - 0.25, 0, 1)
-    green = np.clip(1.35 - np.abs(score - 0.5) * 2.3, 0, 1)
-    blue = np.clip(1.15 - 2.0 * score, 0, 1)
-    alpha = np.where(mask, 38 + score * 180, 0)
-    return np.dstack((red * 255, green * 255, blue * 255, alpha)).astype(np.uint8)
+RAMP_STOPS = np.array([0.0, 0.18, 0.38, 0.58, 0.78, 1.0], dtype=np.float32)
+RAMP_RGB = np.array(
+    [
+        (28, 50, 156),
+        (0, 159, 225),
+        (0, 204, 153),
+        (197, 231, 45),
+        (255, 183, 0),
+        (211, 32, 32),
+    ],
+    dtype=np.float32,
+)
+
+
+def fixed_score(value: np.ndarray, low: float, high: float) -> np.ndarray:
+    """Use the same physical display interval for every year."""
+    return np.clip((value - low) / (high - low), 0, 1)
+
+
+def smooth(value: np.ndarray, radius: float = 2.4) -> np.ndarray:
+    encoded = np.clip(value * 255, 0, 255).astype(np.uint8)
+    image = Image.fromarray(encoded, "L").filter(ImageFilter.GaussianBlur(radius))
+    return np.asarray(image, dtype=np.float32) / 255.0
+
+
+def colour_ramp(score: np.ndarray, mask: np.ndarray, alpha: int = 218) -> np.ndarray:
+    """Continuous scientific-style blue/cyan/yellow/red raster."""
+    score = np.clip(score, 0, 1)
+    rgb = np.empty((*score.shape, 3), dtype=np.float32)
+    for channel in range(3):
+        rgb[..., channel] = np.interp(score, RAMP_STOPS, RAMP_RGB[:, channel])
+    rgba = np.dstack((rgb, np.where(mask, alpha, 0))).astype(np.uint8)
+    rgba[~mask] = 0
+    return rgba
 
 
 def build_year(year_root: Path) -> None:
@@ -43,21 +71,24 @@ def build_year(year_root: Path) -> None:
 
     red, green, blue = (rgb[..., index] for index in range(3))
     ndti = (red - green) / (red + green + 1.0)
-    ndti_8 = np.clip((ndti + 0.28) * (255.0 / 0.52), 0, 255).astype(np.uint8)
-    ndti_smooth = np.asarray(
-        Image.fromarray(ndti_8, "L").filter(ImageFilter.GaussianBlur(1.2)),
-        dtype=np.float32,
-    )
-    ndti_smooth = ndti_smooth * (0.52 / 255.0) - 0.28
-    turbidity = np.clip((ndti_smooth + 0.16) / 0.28, 0, 1)
+    # Deep optical water is near the blue end; high red/green response moves
+    # through cyan/yellow to red. Unlike the old thresholded overlay, every
+    # valid water pixel receives a readable value like a scientific heatmap.
+    turbidity = smooth(fixed_score(ndti, -0.48, 0.02))
     Image.fromarray(colour_ramp(turbidity, water), "RGBA").save(
         year_root / "water-quality.webp", "WEBP", lossless=True, method=6
     )
 
     ratio = red / (green + 1.0)
-    suspended = np.clip((ratio - 0.68) / 0.62, 0, 1)
+    suspended = smooth(fixed_score(ratio, 0.28, 1.08))
     Image.fromarray(colour_ramp(suspended, water), "RGBA").save(
         year_root / "suspended-matter.webp", "WEBP", lossless=True, method=6
+    )
+
+    green_excess = (2.0 * green - red - blue) / (red + green + blue + 1.0)
+    chlorophyll_proxy = smooth(fixed_score(green_excess, -0.08, 0.48))
+    Image.fromarray(colour_ramp(chlorophyll_proxy, water), "RGBA").save(
+        year_root / "chlorophyll.webp", "WEBP", lossless=True, method=6
     )
 
     # Keep transparent pixels genuinely empty. Some WebP renderers retain RGB
@@ -74,6 +105,7 @@ def build_year(year_root: Path) -> None:
     eroded = np.asarray(water_image.filter(ImageFilter.MinFilter(7))) > 0
     edge = water & ~eroded
     shoreline = np.zeros((*water.shape, 4), dtype=np.uint8)
+    shoreline[water] = (16, 129, 190, 92)
     shoreline[edge] = (255, 194, 32, 235)
     Image.fromarray(shoreline, "RGBA").save(
         year_root / "shoreline.webp", "WEBP", lossless=True, method=6
