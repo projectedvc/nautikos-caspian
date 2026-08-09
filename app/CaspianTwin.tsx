@@ -443,7 +443,11 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
         type: "raster",
         source: "annual-filter-overview",
         minzoom: 3,
-        maxzoom: 7,
+        // This validated, basin-wide product is the permanent fallback.  Keep
+        // it visible while zooming: the detailed XYZ layer is drawn above it
+        // when available, but a missing/cold native tile must never make the
+        // selected environmental filter disappear.
+        maxzoom: 16,
         paint: { "raster-opacity": 1, "raster-fade-duration": 0, "raster-resampling": "linear" },
       }, "place-labels");
     }
@@ -528,7 +532,7 @@ export default function CaspianTwin() {
   // Bump when a raster contract changes.  This is intentionally part of every
   // overview and XYZ URL so browsers and the Vercel edge cannot keep an older
   // mask after the rendering pipeline has been corrected.
-  const tileVersion = 27;
+  const tileVersion = 28;
   const [timelapseFromYear, setTimelapseFromYear] = useState(2020);
   const [timelapseToYear, setTimelapseToYear] = useState(2026);
   const [timelapseYear, setTimelapseYear] = useState(2020);
