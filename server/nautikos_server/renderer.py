@@ -421,8 +421,14 @@ class CatalogRenderer:
         # without adding another server dependency.
         finite_fill = float(np.median(radar[water]))
         filled = np.where(radar_valid, radar, finite_fill)
-        fine = np.asarray(Image.fromarray(filled, "F").filter(ImageFilter.GaussianBlur(1.4)), dtype=np.float32)
-        background = np.asarray(Image.fromarray(filled, "F").filter(ImageFilter.GaussianBlur(7.0)), dtype=np.float32)
+        display_low, display_high = np.percentile(filled[radar_valid], (1, 99))
+        normalized = np.clip((filled - display_low) * (255.0 / max(display_high - display_low, 1e-4)), 0, 255).astype(np.uint8)
+        # Pillow's Gaussian blur is defined for 8-bit L/RGB images, not mode F.
+        # Relative contrast is all this detector needs, so normalize the dB
+        # window once and blur the deterministic luminance representation.
+        luminance = Image.fromarray(normalized, "L")
+        fine = np.asarray(luminance.filter(ImageFilter.GaussianBlur(1.4)), dtype=np.float32)
+        background = np.asarray(luminance.filter(ImageFilter.GaussianBlur(7.0)), dtype=np.float32)
         dark = np.clip(background - fine, 0, None)
         low, high = np.percentile(dark[water], (65, 98))
         score = np.clip((dark - low) / max(high - low, 1e-4), 0, 1)
