@@ -54,6 +54,8 @@ test("uses the local Jupyter COG service, six real Copernicus filters and AOI to
   assert.match(component, /SOLUTIONS/);
   assert.match(component, /selection-rectangle/);
   assert.match(component, /type: "raster"/);
+  assert.match(component, /server\.arcgisonline\.com\/ArcGIS\/rest\/services\/World_Imagery/);
+  assert.doesNotMatch(component, /return `\/api\/basemap/);
   assert.doesNotMatch(component, /year === 2026[^\n]*2025/);
   assert.doesNotMatch(component, /monthlyOverviewUrl/);
   assert.doesNotMatch(component, /GROQ_API_KEY/);

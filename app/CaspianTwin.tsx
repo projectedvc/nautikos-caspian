@@ -215,7 +215,11 @@ function baseStyle(): StyleSpecification {
 }
 
 function regionalBasemapTileUrl() {
-  return `/api/basemap?z={z}&x={x}&y={y}&v=regional-surface-2`;
+  // The public imagery endpoint supports CORS and is substantially more
+  // reliable in the browser than relaying every context tile through a
+  // short-lived Vercel function. Analytical Caspian products still come
+  // exclusively from the pinned Jupyter data service below.
+  return "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 }
 
 function addRegionalBasemap(map: MapLibreMap) {
