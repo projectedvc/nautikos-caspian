@@ -22,21 +22,23 @@ test("server-renders the Nautikos Caspian workspace", async () => {
   assert.match(html, /<html lang="ru">/i);
   assert.match(html, /<title>Nautikos — экологическая разведка Каспия<\/title>/i);
   assert.match(html, /Экологический интеллект Каспия/);
-  assert.match(html, /Реальный снимок Каспия/);
-  assert.match(html, /Мутность и шлейфы сбросов/);
+  assert.match(html, /Реки и водотоки/);
+  assert.match(html, /Sentinel.?2 L2A/);
   assert.match(html, /2020/);
   assert.match(html, /2026/);
   assert.doesNotMatch(html, /Your site is taking shape|Building your site/);
 });
 
-test("uses the Jupyter data service, real annual products and AOI tools", async () => {
-  const [component, processRoute, basemapRoute, trendRoute, aiRoute, server] = await Promise.all([
+test("uses the local Jupyter COG service, six real Copernicus filters and AOI tools", async () => {
+  const [component, basemapRoute, trendRoute, aiRoute, server, localProducts, builder, productConfig] = await Promise.all([
     readFile(new URL("../app/CaspianTwin.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/sentinel/process/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/basemap/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/sentinel/trend/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/ai/analyze/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../scripts/start-windows.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../server/nautikos_server/local_products.py", import.meta.url), "utf8"),
+    readFile(new URL("../server/scripts/build_cog_products.py", import.meta.url), "utf8"),
+    readFile(new URL("../server/config/products.json", import.meta.url), "utf8"),
   ]);
 
   assert.match(component, /2020, 2021, 2022, 2023, 2024, 2025, 2026/);
@@ -46,6 +48,7 @@ test("uses the Jupyter data service, real annual products and AOI tools", async 
   assert.match(component, /PRODUCT_BY_LAYER/);
   assert.match(component, /annualTileUrl/);
   assert.match(component, /\/v2\/tiles/);
+  assert.doesNotMatch(component, /annual-filter-overview|overviews\/copernicus|\/api\/filters/);
   assert.match(component, /exportAoiImage/);
   assert.match(component, /\/v2\/aoi\/export/);
   assert.match(component, /SOLUTIONS/);
@@ -57,13 +60,19 @@ test("uses the Jupyter data service, real annual products and AOI tools", async 
 
   assert.match(basemapRoute, /REGIONAL-SATELLITE-CONTEXT/);
   assert.doesNotMatch(basemapRoute, /writeFile|mkdir/);
-  assert.match(processRoute, /NAUTIKOS_DATA_DIR/);
-  assert.match(processRoute, /process\/v1/);
-  assert.match(processRoute, /sentinel-1-grd/);
-  assert.match(processRoute, /sentinel-2-l2a/);
-  assert.match(processRoute, /sentinel-3-olci-l2/);
-  assert.match(processRoute, /annualWindow/);
-  assert.match(processRoute, /max-age=31536000/);
+  const products = JSON.parse(productConfig).products;
+  assert.deepEqual(Object.keys(products).sort(), [
+    "coastal_vegetation", "oil_candidates", "rivers", "water_colour", "water_extent", "water_temperature",
+  ]);
+  assert.match(localProducts, /mode.*local-only|local-only/s);
+  assert.match(localProducts, /sentinel-2-l2a/);
+  assert.match(localProducts, /sentinel-1-grd/);
+  assert.match(localProducts, /sentinel-3-slstr-l2-wst/);
+  assert.match(localProducts, /sentinel-3-olci-l2-water/);
+  assert.doesNotMatch(localProducts, /import requests|process\/v1/);
+  assert.match(builder, /NDWI = \(B03-B08\)\/\(B03\+B08\)|NDWI.*B03.*B08/s);
+  assert.match(builder, /TSM_NN/);
+  assert.match(builder, /schema.*3/s);
   assert.match(trendRoute, /metrics/);
   assert.match(trendRoute, /regression/);
   assert.match(aiRoute, /api\.groq\.com\/openai\/v1\/chat\/completions/);

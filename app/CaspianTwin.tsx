@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  AlertTriangle,
   BoxSelect,
   Check,
   Download,
@@ -25,9 +24,9 @@ import { GeoJSONSource, Map as MapLibreMap, type MapOptions, StyleSpecification 
 import { PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type BBox = [number, number, number, number];
-type DatasetKey = "s2" | "s1" | "s3" | "era5" | "dem";
-type ViewKey = "optical" | "waterOptical" | "shoreline" | "water" | "chlorophyll" | "suspendedMatter" | "waterTemperature" | "vegetation" | "coastMoisture" | "soil" | "erosion" | "oil";
-type LayerKey = "true-color" | "olci-true-color" | "shoreline" | "water-quality" | "chlorophyll" | "suspended-matter" | "water-temperature" | "vegetation" | "coast-moisture" | "soil-stress" | "erosion-risk" | "oil-roughness";
+type DatasetKey = "s2" | "s1" | "s3";
+type ViewKey = "rivers" | "shoreline" | "coastalVegetation" | "oilCandidates" | "waterTemperature" | "waterColour";
+type LayerKey = "true-color" | "rivers" | "shoreline" | "vegetation" | "oil-candidates" | "water-temperature" | "water-colour";
 type WorkspaceMode = "monitoring" | "solutions";
 type SidebarSection = "water" | "land" | "tools";
 type SolutionKey = "discharge" | "wetland" | "shoreline" | "vegetation" | "oil-response";
@@ -74,21 +73,16 @@ const CASPIAN_BBOX: BBox = [46.0, 36.0, 55.8, 47.4];
 const REGIONAL_BASEMAP_BBOX: BBox = [25, 25, 75, 60];
 const YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
 const DATA_API_BASE = (process.env.NEXT_PUBLIC_NAUTIKOS_DATA_URL ?? "").replace(/\/$/, "");
-const WATER_FILTERS: ViewKey[] = ["optical", "waterOptical", "water", "suspendedMatter", "chlorophyll", "oil", "shoreline"];
-const LAND_FILTERS: ViewKey[] = ["optical", "shoreline", "vegetation", "soil"];
+const WATER_FILTERS: ViewKey[] = ["oilCandidates", "waterTemperature", "waterColour"];
+const LAND_FILTERS: ViewKey[] = ["rivers", "shoreline", "coastalVegetation"];
 const PRODUCT_BY_LAYER: Record<LayerKey, string> = {
   "true-color": "rgb",
-  "olci-true-color": "water_colour",
+  rivers: "rivers",
   shoreline: "water_extent",
-  "water-quality": "turbidity",
-  chlorophyll: "chlorophyll",
-  "suspended-matter": "suspended_matter",
+  vegetation: "coastal_vegetation",
+  "oil-candidates": "oil_candidates",
   "water-temperature": "water_temperature",
-  vegetation: "vegetation",
-  "coast-moisture": "coast_moisture",
-  "soil-stress": "soil_stress",
-  "erosion-risk": "terrain_runoff",
-  "oil-roughness": "oil_candidates",
+  "water-colour": "water_colour",
 };
 const SOLUTIONS: Array<{ id: SolutionKey; label: string; detail: string; icon: typeof Sparkles }> = [
   { id: "discharge", label: "Проверка сбросов", detail: "Исток шлейфа, точки отбора проб и маршрут", icon: Droplets },
@@ -110,181 +104,67 @@ const regions: Region[] = [
 
 const allFilters: FilterDefinition[] = [
   {
-    id: "optical",
-    label: "Снимок и граница воды",
-    subtitle: "Единая RGB‑сетка · Sentinel‑2 · 2020–2026",
+    id: "rivers",
+    label: "Реки и водотоки",
+    subtitle: "Sentinel‑2 L2A · медиана июля · NDWI B03/B08 · 10 м",
     dataset: "s2",
-    layer: "true-color",
-    icon: Satellite,
-    legend: [],
-    explanation: "Каждый год совмещён с одной и той же спутниковой подложкой и измеренной границей воды. Поэтому шторка показывает изменение площади и берега без смещения снимка; при детальном приближении проявляется тайловая HD‑подложка Jupyter.",
-  },
-  {
-    id: "waterOptical",
-    label: "Вода: спектральный снимок",
-    subtitle: "Sentinel‑3 OLCI · цвет воды · 300 м",
-    dataset: "s3",
-    layer: "olci-true-color",
-    icon: Satellite,
-    legend: [],
-    explanation: "Реальные радиансы OLCI в водных спектральных каналах. Слой показывает крупные водные массы и шлейфы по всему Каспию; разрешение 300 м, поэтому он предназначен для акватории, а не для зданий и узких береговых объектов.",
+    layer: "rivers",
+    icon: Waves,
+    legend: [{ color: "#f03b20", label: "красный · открытая вода по NDWI" }],
+    explanation: "Красным показана открытая вода, выделенная индексом NDWI (B03−B08)/(B03+B08) по медианному июльскому композиту облачно отфильтрованных сцен Sentinel‑2 L2A. Слой помогает увидеть различимые со спутника водотоки и устья, но не является официальной речной сетью: узкие русла и вода под растительностью могут не определяться.",
   },
   {
     id: "shoreline",
-    label: "Обмеление и берег",
-    subtitle: "Sentinel‑2 · MNDWI/NDWI · 10/20 м",
+    label: "Водная граница и изменение берега",
+    subtitle: "Sentinel‑2 L2A · медиана июля · площадь воды по NDWI · 10 м",
     dataset: "s2",
     layer: "shoreline",
-    icon: Waves,
-    legend: [{ color: "#0f628d", label: "вода в выбранном году" }],
-    explanation: "Граница вода/суша рассчитана из MNDWI и NDWI того же фиксированного летнего Sentinel‑2-композита, который виден под слоем. Жёлтая линия показывает берег выбранного года; шторка сравнивает одинаковый сезон.",
+    icon: ScanSearch,
+    legend: [{ color: "#3182bd", label: "наблюдаемая площадь воды" }, { color: "#ffc62a", label: "граница воды выбранного года" }],
+    explanation: "Площадь воды и её граница рассчитаны по NDWI из медианного июльского композита Sentinel‑2 L2A. Шторка сравнивает одинаковый сезон разных лет и показывает наблюдаемое отступление или наступление воды. Слой не устанавливает причину изменения: уровень моря, влажный грунт, волны и смешанные береговые пиксели требуют дополнительной проверки.",
   },
   {
-    id: "water",
-    label: "Шлейфы сбросов и мутность",
-    subtitle: "Sentinel‑2 · NDWI + RGB · 10/20 м",
-    dataset: "s2",
-    layer: "water-quality",
-    icon: Droplets,
-    legend: [{ color: "#29b8db", label: "глубокая вода" }, { color: "#e8872f", label: "кандидат мутности" }],
-    explanation: "Тёплым цветом отмечается повышенное красное отражение внутри маски воды — возможная взвесь, речной шлейф или сброс у берега. Это детальный кандидат 10/20 м, а не доказательство загрязнения: результат сверяется с TSM Sentinel‑3, направлением течения и полевой пробой.",
-  },
-  {
-    id: "chlorophyll",
-    label: "Хлорофилл / цветение",
-    subtitle: "Sentinel‑3 OLCI · NDCI‑скрининг · 300 м",
-    dataset: "s3",
-    layer: "chlorophyll",
-    icon: Waves,
-    legend: [{ color: "#174ea6", label: "низкий сигнал" }, { color: "#25a56a", label: "повышенный" }, { color: "#ef5b3f", label: "высокий приоритет" }],
-    explanation: "NDCI использует реальные каналы OLCI 665 и 709 нм как сравнительный сигнал хлорофилла. Красный — высокий относительный приоритет проверки цветения; это не лабораторная концентрация, не токсичность и не видовой анализ цианобактерий.",
-  },
-  {
-    id: "suspendedMatter",
-    label: "Взвесь и крупные шлейфы",
-    subtitle: "Sentinel‑3 OLCI · индекс осадка · 300 м",
-    dataset: "s3",
-    layer: "suspended-matter",
-    icon: Droplets,
-    legend: [{ color: "#183b8f", label: "чистая вода" }, { color: "#f0a72f", label: "взвесь" }, { color: "#d83a2e", label: "сильная аномалия" }],
-    explanation: "Отношение каналов OLCI 620 и 560 нм выделяет крупные речные шлейфы и повышенный взвешенный сигнал. Источник нельзя определить только по цвету — нужна проверка течений, предприятий и полевой пробой.",
-  },
-  {
-    id: "waterTemperature",
-    label: "Температура воды",
-    subtitle: "Copernicus ERA5 · 10 суток · ~28 км",
-    dataset: "era5",
-    layer: "water-temperature",
-    icon: Waves,
-    legend: [{ color: "#2459c4", label: "холоднее" }, { color: "#f2b134", label: "теплее" }, { color: "#dc3f32", label: "тепловая аномалия" }],
-    explanation: "Средняя температура поверхности за одинаковые десять дней июля по реанализу Copernicus ERA5. Слой показывает только крупномасштабную тепловую картину Каспия; локальные сбросы требуют более детального теплового сенсора и полевой проверки.",
-  },
-  {
-    id: "vegetation",
-    label: "Растительность",
-    subtitle: "NDVI · влажность покрова",
+    id: "coastalVegetation",
+    label: "Растительность прибрежного буфера",
+    subtitle: "Sentinel‑2 L2A · медиана июля · NDVI B08/B04 · 10 м",
     dataset: "s2",
     layer: "vegetation",
     icon: Leaf,
-    legend: [{ color: "#39a96b", label: "активный покров" }, { color: "#b78a45", label: "слабый покров" }],
-    explanation: "Сравнение показывает потерю или восстановление растительности и помогает выбрать место для полевой проверки или восстановления.",
+    legend: [{ color: "#c2e699", label: "низкий NDVI" }, { color: "#31a354", label: "средний NDVI" }, { color: "#006837", label: "высокий NDVI" }],
+    explanation: "NDVI (B08−B04)/(B08+B04) рассчитан по медианному июльскому композиту Sentinel‑2 L2A и показан в прибрежном буфере после исключения открытой воды. Единый сезон позволяет сравнивать состояние зелёного покрова между годами. Индекс не определяет вид растения, инвазивность или причину стресса без полевой проверки.",
   },
   {
-    id: "soil",
-    label: "Проблемы почвы",
-    subtitle: "BSI · оголение · стресс",
-    dataset: "s2",
-    layer: "soil-stress",
-    icon: ScanSearch,
-    legend: [{ color: "#ef402d", label: "высокий приоритет" }, { color: "#f0a72f", label: "возможный стресс" }, { color: "#268a5b", label: "стабильный покров" }],
-    explanation: "Красным подсвечиваются участки с сочетанием оголённого грунта и слабой растительности — кандидаты на деградацию, засоление или рекультивацию. Спектральный сигнал не заменяет анализ почвенной пробы.",
-  },
-  {
-    id: "coastMoisture",
-    label: "Влажность побережья",
-    subtitle: "Sentinel‑2 · NDMI · 20 м",
-    dataset: "s2",
-    layer: "coast-moisture",
-    icon: Droplets,
-    legend: [{ color: "#d58a34", label: "сухо" }, { color: "#66a85b", label: "умеренно" }, { color: "#176ca4", label: "влажно / подтоплено" }],
-    explanation: "NDMI показывает относительную влажность растительности и грунта в береговой полосе. Синий сигнал может означать заболачивание, подтопление или влажную растительность — причина уточняется по снимку и рельефу.",
-  },
-  {
-    id: "erosion",
-    label: "Рельеф, низины и сток",
-    subtitle: "Copernicus DEM GLO‑30 · 30 м",
-    dataset: "dem",
-    layer: "erosion-risk",
-    icon: ScanSearch,
-    legend: [{ color: "#0d6194", label: "низина" }, { color: "#57a35d", label: "до 50 м" }, { color: "#d58b21", label: "возвышенность" }],
-    explanation: "Цифровая модель рельефа 30 м показывает низины и высоты. Направление стока и уклон рассчитываются ИИ по соседним пикселям DEM; сам цвет высоты не является фактом эрозии или загрязнения.",
-  },
-  {
-    id: "oil",
-    label: "Кандидаты утечки нефти",
-    subtitle: "Sentinel‑1 SAR · VV · 10 м",
+    id: "oilCandidates",
+    label: "Кандидаты поверхностной плёнки",
+    subtitle: "Sentinel‑1 IW GRD · тёмные VV‑аномалии · ≈20 м",
     dataset: "s1",
-    layer: "oil-roughness",
+    layer: "oil-candidates",
     icon: Radar,
-    legend: [{ color: "#efb22d", label: "SAR-кандидат" }, { color: "#e84535", label: "высокий приоритет проверки" }],
-    explanation: "SAR выделяет тёмные формации на воде при облаках и ночью. Для тревоги кандидат проверяется по ветру, AIS и повторному пролёту.",
+    legend: [{ color: "#feb24c", label: "кандидат гладкой поверхности" }, { color: "#bd0026", label: "сильная тёмная VV‑аномалия" }],
+    explanation: "Sentinel‑1 отмечает связные участки воды, где обратное рассеяние VV ниже локального радиолокационного фона. Такой dark spot совместим с поверхностной плёнкой, но не доказывает наличие нефти: похожий сигнал создают штиль, биогенные плёнки, дождь и ветровые тени. Для тревоги нужны данные о ветре и AIS, повторный пролёт и полевая проверка.",
+  },
+  {
+    id: "waterTemperature",
+    label: "Температура поверхности воды",
+    subtitle: "Sentinel‑3 SLSTR L2 WST · SST · °C · 1 км",
+    dataset: "s3",
+    layer: "water-temperature",
+    icon: Waves,
+    legend: [{ color: "#466be3", label: "−2…10 °C · холоднее" }, { color: "#32f298", label: "10…24 °C · умеренно" }, { color: "#e12a1c", label: "24…35 °C · теплее" }],
+    explanation: "Sentinel‑3 SLSTR Level‑2 WST показывает температуру поверхности воды в градусах Цельсия на сетке около 1 км. Фиксированная шкала позволяет сопоставлять крупномасштабную тепловую структуру между годами. Это не температура воздуха и не измерение локального сброса меньшего размера, чем пиксель SLSTR.",
+  },
+  {
+    id: "waterColour",
+    label: "Цвет воды и взвесь",
+    subtitle: "Sentinel‑3 OLCI L2 WATER · water colour / TSM · 300 м",
+    dataset: "s3",
+    layer: "water-colour",
+    icon: Droplets,
+    legend: [{ color: "#225ea8", label: "низкий оптический сигнал взвеси" }, { color: "#41b6c4", label: "изменённый цвет воды" }, { color: "#edf8b1", label: "повышенный TSM‑сигнал" }],
+    explanation: "Sentinel‑3 OLCI Level‑2 WATER показывает цвет воды и крупномасштабный оптический сигнал взвешенного вещества (TSM) с разрешением 300 м. Слой подходит для сравнения крупных водных масс и шлейфов, но не различает природный осадок, водоросли и техногенный сброс и не заменяет лабораторную концентрацию по пробе воды.",
   },
 ];
-
-// Only independently reproducible local products are shown. Sentinel-3
-// chlorophyll/TSM will be enabled after its L2 WATER archive is ingested;
-// Sentinel-1 oil-candidate screening is already backed by a fixed SAR set.
-const SUPPORTED_FILTERS = new Set<ViewKey>(["optical", "waterOptical", "shoreline", "water", "suspendedMatter", "chlorophyll", "oil", "vegetation", "soil"]);
-const FILTER_COPY: Partial<Record<ViewKey, Pick<FilterDefinition, "label" | "subtitle" | "explanation">>> = {
-  optical: {
-    label: "Реальный снимок Каспия",
-    subtitle: "Sentinel‑2 L2A · единый июль · 10 м",
-    explanation: "Реальная июльская мозаика Sentinel‑2. Для всех лет используется один сезон и одна сетка; несколько очищенных от облаков сцен закрывают разрывы, а шторка сравнивает 2020–2026 без подмены кадра при приближении.",
-  },
-  waterOptical: {
-    label: "Оптическая поверхность воды",
-    subtitle: "Sentinel‑2 L2A · RGB + NDWI · июль · 10 м",
-    explanation: "Исходные RGB‑пиксели показаны только внутри спектральной маски воды. Слой помогает рассматривать цвет воды, речные шлейфы и прибрежные изменения без окрашивания суши.",
-  },
-  shoreline: {
-    label: "Граница воды и обмеление",
-    subtitle: "Sentinel‑2 L2A · NDWI · июль · 10 м",
-    explanation: "Контур рассчитан из зелёного и ближнего инфракрасного каналов того же годового кадра. Жёлтая кромка показывает измеренную границу воды, а шторка — её смещение между годами.",
-  },
-  water: {
-    label: "Мутность и шлейфы сбросов",
-    subtitle: "Sentinel‑2 L2A · NDTI‑скрининг · июль · 10 м",
-    explanation: "Индекс красного и зелёного отражения применяется только внутри маски воды. Тёплые зоны — кандидаты на взвесь или речной/техногенный шлейф, которые требуют проверки повторным снимком и пробой воды.",
-  },
-  suspendedMatter: {
-    label: "Взвесь в воде",
-    subtitle: "Sentinel‑2 L2A · Red/Green · июль · 10 м",
-    explanation: "Относительный сигнал взвешенного вещества рассчитан из согласованных красного и зелёного каналов. Это сравнительный приоритет для обследования, а не лабораторная концентрация.",
-  },
-  chlorophyll: {
-    label: "Скрининг цветения воды",
-    subtitle: "Sentinel‑2 L2A · Green/Red/Blue proxy · июль · 10 м",
-    explanation: "Непрерывная шкала показывает относительный избыток зелёного сигнала внутри маски воды. Жёлтые и красные зоны — приоритет повторной проверки на цветение; это оптический скрининг, а не лабораторная концентрация хлорофилла.",
-  },
-  oil: {
-    label: "Кандидаты нефтяной плёнки",
-    subtitle: "Sentinel‑1 GRD SAR · тёмные пятна · июль · 10/20 м",
-    explanation: "Радар выделяет участки, где поверхность воды стала необычно гладкой относительно локального фона. Это рабочий кандидат: платформа должна сверить форму пятна с ветром, судами/AIS, нефтяной инфраструктурой и повторным пролётом, затем направить точку на полевую проверку.",
-  },
-  vegetation: {
-    label: "Растительность побережья",
-    subtitle: "Sentinel‑2 L2A · NDVI · июль · 10 м",
-    explanation: "NDVI показывает потерю и восстановление растительного покрова вокруг Каспия на одинаковой сетке 2020–2026.",
-  },
-  soil: {
-    label: "Оголение и стресс почвы",
-    subtitle: "Sentinel‑2 L2A · Visible/NIR · июль · 10 м",
-    explanation: "Слой выделяет сушу со слабым растительным сигналом как кандидата на деградацию. Для диагноза засоления или загрязнения нужна полевая проба.",
-  },
-};
-const filters: FilterDefinition[] = allFilters
-  .filter((item) => SUPPORTED_FILTERS.has(item.id))
-  .map((item) => ({ ...item, ...(FILTER_COPY[item.id] ?? {}) }));
+const filters: FilterDefinition[] = allFilters;
 
 function bboxPolygon(bbox: BBox) {
   const [west, south, east, north] = bbox;
@@ -360,25 +240,27 @@ function annualTileUrl(year: number, layer: LayerKey, version: number) {
   return `${DATA_API_BASE}/v2/tiles/${PRODUCT_BY_LAYER[layer]}/${year}/{z}/{x}/{y}.png?v=${version}`;
 }
 
-function annualOverviewUrl(year: number, layer: LayerKey, version: number) {
-  return `/overviews/annual/${year}/${layer}.webp?v=${version}`;
+function rgbOverviewUrl(year: number, version: number) {
+  return `/overviews/annual/${year}/true-color.webp?v=${version}`;
 }
 
-function overviewCoordinates(): [[number, number], [number, number], [number, number], [number, number]] {
+function rgbOverviewCoordinates(): [[number, number], [number, number], [number, number], [number, number]] {
   const [west, south, east, north] = CASPIAN_BBOX;
   return [[west, north], [east, north], [east, south], [west, south]];
 }
 
 function productPeriod(year: number, layer: LayerKey) {
-  if (["true-color", "shoreline", "vegetation"].includes(layer)) return `Sentinel-2 L2A · июль ${year} · 10/20 м`;
-  if (layer === "erosion-risk") return "статический рельеф";
-  if (layer === "water-temperature") return `Июль ${year} · водная маска`;
-  if (layer === "oil-roughness") return `Июль ${year} · SAR-кандидаты`;
-  return `Июль ${year} · проверенный локальный продукт`;
+  if (layer === "true-color") return `Sentinel-2 L2A · июль ${year} · RGB · 10 м`;
+  if (layer === "rivers") return `Sentinel-2 L2A · медиана июля ${year} · NDWI · 10 м`;
+  if (layer === "shoreline") return `Sentinel-2 L2A · медиана июля ${year} · площадь воды · 10 м`;
+  if (layer === "vegetation") return `Sentinel-2 L2A · медиана июля ${year} · NDVI · 10 м`;
+  if (layer === "oil-candidates") return `Sentinel-1 IW GRD · июль ${year} · кандидаты поверхностной плёнки · ≈20 м`;
+  if (layer === "water-temperature") return `Sentinel-3 SLSTR L2 WST · ${year} · °C · 1 км`;
+  return `Sentinel-3 OLCI L2 WATER · ${year} · water colour / TSM · 300 м`;
 }
 
 function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, version: number) {
-  const ids = ["annual-photo-overview", "annual-photo-tiles", "annual-filter-overview", "annual-filter-tiles", "monthly-frame"];
+  const ids = ["annual-photo-overview", "annual-photo-tiles", "annual-filter-tiles", "monthly-frame"];
   for (const id of ids) {
     if (map.getLayer(id)) map.removeLayer(id);
     if (map.getSource(id)) map.removeSource(id);
@@ -386,8 +268,8 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
 
   map.addSource("annual-photo-overview", {
     type: "image",
-    url: annualOverviewUrl(year, "true-color", version),
-    coordinates: overviewCoordinates(),
+    url: rgbOverviewUrl(year, version),
+    coordinates: rgbOverviewCoordinates(),
   });
   map.addLayer({
     id: "annual-photo-overview",
@@ -426,47 +308,21 @@ function updateAnnualTiles(map: MapLibreMap, year: number, layer: LayerKey, vers
   }, "place-labels");
 
   if (layer !== "true-color") {
-    const hasAlignedOverview = ["olci-true-color", "water-quality", "suspended-matter", "chlorophyll", "shoreline"].includes(layer);
-    // SAR oil screening is meaningful only on a local scale. Do not launch a
-    // basin-wide cold render that will time out and leave an apparently broken
-    // filter; MapLibre requests it as soon as the user zooms into the coast.
-    const detailOnly = layer === "oil-roughness";
-    const nativeMinzoom = hasAlignedOverview || detailOnly ? 7 : 3;
-    if (hasAlignedOverview) {
-      map.addSource("annual-filter-overview", {
-        type: "image",
-        url: annualOverviewUrl(year, layer, version),
-        coordinates: overviewCoordinates(),
-      });
-      map.addLayer({
-        id: "annual-filter-overview",
-        type: "raster",
-        source: "annual-filter-overview",
-        minzoom: 3,
-        // This validated, basin-wide product is the permanent fallback.  Keep
-        // it visible while zooming: the detailed XYZ layer is drawn above it
-        // when available, but a missing/cold native tile must never make the
-        // selected environmental filter disappear.
-        maxzoom: 16,
-        paint: { "raster-opacity": 1, "raster-fade-duration": 0, "raster-resampling": "linear" },
-      }, "place-labels");
-    }
-
-    // At native zoom the same filter switches to raw-reflectance XYZ tiles.
-    // Both products use the identical Caspian bbox and annual frame.
+    // Every analytical filter is served from one local COG-backed XYZ source
+    // at every map zoom. No static image overlay is substituted on overview.
     map.addSource("annual-filter-tiles", {
       type: "raster",
       tiles: [annualTileUrl(year, layer, version)],
       tileSize: 256,
-      minzoom: nativeMinzoom,
-      maxzoom: layer === "olci-true-color" || layer === "chlorophyll" || layer === "suspended-matter" ? 11 : 14,
+      minzoom: 3,
+      maxzoom: 15,
       bounds: CASPIAN_BBOX,
     });
     map.addLayer({
       id: "annual-filter-tiles",
       type: "raster",
       source: "annual-filter-tiles",
-      minzoom: nativeMinzoom,
+      minzoom: 3,
       paint: {
         // Opacity is encoded once in the PNG alpha channel. Applying a second
         // layer opacity washes the palette out and exposes rectangular seams.
@@ -515,8 +371,8 @@ export default function CaspianTwin() {
 
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("monitoring");
   const [solutionType, setSolutionType] = useState<SolutionKey>("discharge");
-  const [sidebarSection, setSidebarSection] = useState<SidebarSection>("water");
-  const [activeView, setActiveView] = useState<ViewKey>("optical");
+  const [sidebarSection, setSidebarSection] = useState<SidebarSection>("land");
+  const [activeView, setActiveView] = useState<ViewKey>("rivers");
   const [beforeYear, setBeforeYear] = useState<number>(2020);
   const [afterYear, setAfterYear] = useState<number>(2026);
   const [selectedRegion, setSelectedRegion] = useState("all");
@@ -529,10 +385,9 @@ export default function CaspianTwin() {
   const [mapsReady, setMapsReady] = useState(0);
   const [swipe, setSwipe] = useState(50);
   const [compareEnabled, setCompareEnabled] = useState(true);
-  // Bump when a raster contract changes.  This is intentionally part of every
-  // overview and XYZ URL so browsers and the Vercel edge cannot keep an older
-  // mask after the rendering pipeline has been corrected.
-  const tileVersion = 28;
+  // Bump when a raster contract changes so browsers do not retain tiles from
+  // an older product or visualisation contract.
+  const tileVersion = 32;
   const [timelapseFromYear, setTimelapseFromYear] = useState(2020);
   const [timelapseToYear, setTimelapseToYear] = useState(2026);
   const [timelapseYear, setTimelapseYear] = useState(2020);
@@ -549,9 +404,9 @@ export default function CaspianTwin() {
     return ids.map((id) => filters.find((item) => item.id === id)).filter((item): item is FilterDefinition => Boolean(item));
   }, [sidebarSection]);
   const selectedArea = aoi ? bboxAreaKm2(aoi) : null;
-  const trendMetric = activeView === "vegetation" ? "vegetation" : ["soil", "coastMoisture", "erosion"].includes(activeView) ? "soilStress" : "waterShare";
-  const overlaySlope = trendMetric === "waterShare" ? trendResult?.slopes.waterShare : trendMetric === "vegetation" ? trendResult?.slopes.vegetation : trendResult?.slopes.soilStress;
-  const overlayAdverse = trendMetric === "soilStress" ? (overlaySlope ?? 0) > 0 : (overlaySlope ?? 0) < 0;
+  const trendMetric = "waterShare" as const;
+  const overlaySlope = trendResult?.slopes.waterShare;
+  const overlayAdverse = (overlaySlope ?? 0) < 0;
   const overlayColor = workspaceMode === "solutions" ? trendResult ? overlayAdverse ? "#ef5b4d" : "#20a46b" : "#f0a72f" : "#087dac";
 
   useEffect(() => {
@@ -687,8 +542,8 @@ export default function CaspianTwin() {
       return;
     }
 
-    const slope = trendMetric === "waterShare" ? trendResult?.slopes.waterShare : trendMetric === "vegetation" ? trendResult?.slopes.vegetation : trendResult?.slopes.soilStress;
-    const adverse = trendMetric === "soilStress" ? (slope ?? 0) > 0 : (slope ?? 0) < 0;
+    const slope = trendResult?.slopes.waterShare;
+    const adverse = (slope ?? 0) < 0;
     const color = trendResult ? adverse ? "#ef5b4d" : "#20a46b" : "#f0a72f";
     areaSource.setData({ ...bboxPolygon(aoi), properties: { color } });
     // Никогда не рисуем «AI-точки» без координат, полученных моделью сегментации.
@@ -819,8 +674,8 @@ export default function CaspianTwin() {
   function selectSidebar(section: SidebarSection) {
     setSidebarSection(section);
     clearAoi();
-    if (section === "water" && !WATER_FILTERS.includes(activeView)) setActiveView("optical");
-    if (section === "land" && !LAND_FILTERS.includes(activeView)) setActiveView("optical");
+    if (section === "water" && !WATER_FILTERS.includes(activeView)) setActiveView("oilCandidates");
+    if (section === "land" && !LAND_FILTERS.includes(activeView)) setActiveView("rivers");
   }
 
   function changeRegion(regionId: string) {
@@ -982,18 +837,18 @@ export default function CaspianTwin() {
             {aoi && <button onClick={clearAoi}><X size={17} /><span><strong>Очистить участок</strong><small>{selectedArea ? formatArea(selectedArea) : ""}</small></span></button>}
           </div>
         </> : <>
-        <div className="panel-heading"><span>КАСПИЙ · РАБОЧИЕ СЛОИ</span><h1>{sidebarSection === "water" ? "Вода" : sidebarSection === "land" ? "Берег и суша" : "Инструменты"}</h1></div>
+        <div className="panel-heading"><span>КАСПИЙ · АНАЛИТИЧЕСКИЕ СЛОИ</span><h1>{sidebarSection === "water" ? "Вода · Sentinel‑1 + Sentinel‑3" : sidebarSection === "land" ? "Суша и берег · Sentinel‑2" : "Инструменты"}</h1></div>
         <div className="sidebar-tabs" role="tablist" aria-label="Группы слоёв">
-          <button className={sidebarSection === "water" ? "active" : ""} onClick={() => selectSidebar("water")}><Droplets size={15} /><span>Вода</span></button>
-          <button className={sidebarSection === "land" ? "active" : ""} onClick={() => selectSidebar("land")}><Leaf size={15} /><span>Берег</span></button>
+          <button className={sidebarSection === "water" ? "active" : ""} onClick={() => selectSidebar("water")}><Droplets size={15} /><span>Вода · S1/S3</span></button>
+          <button className={sidebarSection === "land" ? "active" : ""} onClick={() => selectSidebar("land")}><Leaf size={15} /><span>Суша · S2</span></button>
           <button className={sidebarSection === "tools" ? "active" : ""} onClick={() => selectSidebar("tools")}><ScanSearch size={15} /><span>Инструменты</span></button>
         </div>
         {sidebarSection !== "tools" ? (
           <div className="filter-list grouped">
             {visibleFilters.map((item, index) => {
               const Icon = item.icon;
-              const showGroupTitle = index === 0 || (sidebarSection === "water" && index === 2) || (sidebarSection === "land" && index === 1);
-              const groupTitle = index === 0 ? (sidebarSection === "water" ? "СНИМКИ И РАДАР ВОДЫ" : "ИСХОДНЫЙ СНИМОК") : "ЭКОЛОГИЧЕСКИЕ ПОКАЗАТЕЛИ";
+              const showGroupTitle = index === 0;
+              const groupTitle = sidebarSection === "water" ? "SENTINEL‑1 SAR + SENTINEL‑3 SLSTR/OLCI" : "SENTINEL‑2 · СУША И БЕРЕГ";
               return <div className="filter-entry" key={item.id}>{showGroupTitle && <span className="filter-group-title">{groupTitle}</span>}<button className={item.id === activeView ? "active" : ""} onClick={() => selectFilter(item.id)}><span className="filter-icon"><Icon size={17} /></span><span><strong>{item.label}</strong><small>{item.subtitle}</small></span></button></div>;
             })}
           </div>
@@ -1079,14 +934,13 @@ export default function CaspianTwin() {
             <section className="analysis-card">
               <div className="analysis-title"><span className="analysis-icon"><Sparkles size={18} /></span><div><span>СПУТНИКОВЫЕ МЕТРИКИ + AI</span><h3>Сценарий на 2027</h3></div></div>
               <p>{activeFilter.explanation}</p>
-              <div className="analysis-facts"><span><Check size={14} /> Все 7 лет, одинаковый сезон</span><span><Check size={14} /> Локальные спектральные продукты</span><span><Check size={14} /> Линейный тренд + показатель R²</span></div>
+              <div className="analysis-facts"><span><Check size={14} /> Все 7 лет, одинаковый сезон</span><span><Check size={14} /> Sentinel‑2 L2A + Sentinel‑1 GRD + Sentinel‑3 SLSTR/OLCI</span><span><Check size={14} /> Линейный тренд + показатель R²</span></div>
               <button className="ai-run" disabled={trendStatus === "loading" || aiStatus === "loading"} onClick={runAiAnalysis}>{trendStatus === "loading" || aiStatus === "loading" ? <LoaderCircle className="spin" size={15} /> : <TrendingUp size={15} />}{trendStatus === "loading" ? "Считаю ряд 2020–2026…" : aiStatus === "loading" ? "Groq объясняет прогноз…" : "Рассчитать прогноз 2027"}</button>
               {(trendStatus === "error" || aiStatus === "error") && <p className="ai-error">Расчёт не завершён. Карта и фильтры продолжают работать; можно повторить.</p>}
-              {trendResult && <div className="prediction-result"><div className="prediction-head"><div><span>ПРОГНОЗ 2027</span><strong>{trendMetric === "waterShare" ? `${((trendResult.forecast.waterShare ?? 0) * 100).toFixed(1)}% воды в области` : trendMetric === "vegetation" ? `NDVI-показатель ${(trendResult.forecast.vegetation ?? 0).toFixed(3)}` : `стресс почвы ${((trendResult.forecast.soilStress ?? 0) * 100).toFixed(1)}%`}</strong></div><b>{Math.round(trendResult.confidence * 100)}% R²</b></div><TrendChart result={trendResult} metric={trendMetric} /><small>{trendResult.method}</small><p>{trendResult.limitation}</p></div>}
+              {trendResult && <div className="prediction-result"><div className="prediction-head"><div><span>ПРОГНОЗ 2027</span><strong>{`${((trendResult.forecast.waterShare ?? 0) * 100).toFixed(1)}% воды в области`}</strong></div><b>{Math.round(trendResult.confidence * 100)}% R²</b></div><TrendChart result={trendResult} metric={trendMetric} /><small>{trendResult.method}</small><p>{trendResult.limitation}</p></div>}
               {aiResult && <div className="ai-result"><div className="ai-result-head"><strong>Groq Vision · Qwen 3.6 · AOI + метрики</strong><span className={`risk ${aiResult.risk.replace(" ", "-")}`}>риск: {aiResult.risk}</span></div><p>{aiResult.summary}</p>{aiResult.evidence.length > 0 && <div><strong>Основание</strong><ul>{aiResult.evidence.map((item) => <li key={item}>{item}</li>)}</ul></div>}{aiResult.nextSteps.length > 0 && <div><strong>Следующие шаги</strong><ul>{aiResult.nextSteps.map((item) => <li key={item}>{item}</li>)}</ul></div>}<small>{aiResult.limitation}</small></div>}
             </section>
             <section className="scene-card"><strong>Сопоставимые продукты</strong><div><span>{beforeYear}</span><code>CASPIAN-{beforeYear}-{activeFilter.layer}</code><small>{productPeriod(beforeYear, activeFilter.layer)} · фиксированный продукт</small></div><div><span>{afterYear}</span><code>CASPIAN-{afterYear}-{activeFilter.layer}</code><small>{productPeriod(afterYear, activeFilter.layer)} · фиксированный продукт</small></div></section>
-            {activeView === "oil" && <div className="honesty-card warning"><AlertTriangle size={17} /><div><strong>Это фильтр кандидатов</strong><p>Тёмная формация SAR может быть нефтью, штилем или ветровой тенью. Для тревоги нужны ветер, AIS и повторный пролёт.</p></div></div>}
           </div>
         )}
           </>

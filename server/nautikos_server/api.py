@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import math
 import re
 from io import BytesIO
@@ -22,7 +21,14 @@ from rasterio.warp import transform_bounds
 from rasterio.windows import from_bounds as window_from_bounds
 
 from . import __version__
-from .renderer import CatalogRenderer, SUPPORTED_PRODUCTS
+from .local_products import (
+    LOCAL_PRODUCT_IDS,
+    PRODUCT_SPECS,
+    InvalidLocalProduct,
+    LocalProductStore,
+    LocalProductUnavailable,
+)
+from .renderer import CatalogRenderer
 from .settings import get_settings
 
 
@@ -31,6 +37,7 @@ PRODUCT_RE = re.compile(r"^[a-z][a-z0-9_-]{1,48}$")
 TILE_RE = re.compile(r"^[0-9]+$")
 settings = get_settings()
 renderer = CatalogRenderer(settings)
+local_products = LocalProductStore(settings.nautikos_data_root)
 # A browser can request dozens of tiles after a single zoom gesture.  Each
 # uncached render opens several COG windows, so unbounded FastAPI worker threads
 # can exhaust memory and kill the data service.  Two concurrent builds keep
@@ -76,6 +83,15 @@ class ExportRequest(BBoxRequest):
 
 
 def product_raster(product: str, year: int) -> Path:
+    if product in LOCAL_PRODUCT_IDS:
+        try:
+            return local_products.resolve(product, year).cog_path
+        except LocalProductUnavailable as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except InvalidLocalProduct as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if product != "rgb":
+        raise HTTPException(status_code=400, detail=f"Unsupported product: {product}")
     candidates = (
         settings.nautikos_data_root / "cog" / product / f"{year}.tif",
         settings.nautikos_data_root / "vrt" / product / f"{year}.vrt",
@@ -86,14 +102,13 @@ def product_raster(product: str, year: int) -> Path:
     raise HTTPException(status_code=409, detail=f"Product {product}/{year} is not built")
 
 
-def read_manifest(path: Path) -> dict:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=500, detail=f"Invalid manifest: {path.name}") from exc
-
-
-def rgba_from_raster(path: Path, bbox: tuple[float, float, float, float], width: int, height: int) -> np.ndarray:
+def rgba_from_raster(
+    path: Path,
+    bbox: tuple[float, float, float, float],
+    width: int,
+    height: int,
+    product: str | None = None,
+) -> np.ndarray:
     with rasterio.open(path) as source:
         with WarpedVRT(
             source,
@@ -104,6 +119,9 @@ def rgba_from_raster(path: Path, bbox: tuple[float, float, float, float], width:
             resampling=Resampling.bilinear,
         ) as vrt:
             data = vrt.read(out_shape=(vrt.count, height, width), masked=True)
+
+    if product in PRODUCT_SPECS:
+        return LocalProductStore._rgba_from_data(data, PRODUCT_SPECS[product])
 
     if data.shape[0] >= 3:
         rgb = np.moveaxis(data[:3].filled(0), 0, 2)
@@ -141,21 +159,45 @@ def health() -> dict:
 
 @app.get("/v2/manifest")
 def manifest() -> dict:
-    root = settings.nautikos_data_root / "manifests"
-    products: dict[str, dict[str, dict]] = {}
-    if root.is_dir():
-        for path in sorted(root.glob("*/*.json")):
-            product = path.parent.name
-            products.setdefault(product, {})[path.stem] = read_manifest(path)
-    return {"schema": 2, "years": YEARS, "products": products}
+    # Compatibility alias.  Never enumerate legacy manifests: only the six
+    # schema-3 local products are public through this contract.
+    return local_products.contract()
+
+
+@app.get("/v3/manifest")
+def local_manifest() -> dict:
+    """Report the strict local filter contract and actual asset availability."""
+    return local_products.contract()
 
 
 @app.get("/v2/tiles/{product}/{year}/{z}/{x}/{y}.{extension}")
 def tile(product: str, year: int, z: str, x: str, y: str, extension: Literal["webp", "png", "jpg"]):
     if year not in YEARS or not PRODUCT_RE.fullmatch(product) or not all(TILE_RE.fullmatch(value) for value in (z, x, y)):
         raise HTTPException(status_code=400, detail="Invalid tile path")
+    # New scientific filters are deliberately local-only.  If their manifest
+    # or COG is absent/invalid, return an explicit error and never fall through
+    # to the legacy renderer, a remote catalogue, or a synthetic substitute.
+    if product in LOCAL_PRODUCT_IDS:
+        if extension != "png":
+            raise HTTPException(status_code=406, detail="Local scientific products are served as PNG")
+        try:
+            payload = local_products.render_xyz_png(product, year, int(z), int(x), int(y))
+        except LocalProductUnavailable as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except InvalidLocalProduct as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return Response(
+            payload,
+            media_type="image/png",
+            headers={
+                "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+                "X-Nautikos-Source": "local-cog",
+            },
+        )
+    if product != "rgb":
+        raise HTTPException(status_code=404, detail=f"Unsupported product: {product}")
     path = renderer.cache_path(product, year, int(z), int(x), int(y))
-    if not path.is_file() and extension == "png" and product in SUPPORTED_PRODUCTS:
+    if not path.is_file() and extension == "png":
         try:
             with render_slots:
                 path = renderer.render(product, year, int(z), int(x), int(y))
@@ -205,7 +247,13 @@ def export_image(request: ExportRequest) -> Response:
     base = rgba_from_raster(product_raster("rgb", request.year), request.bbox, request.width, request.height)
     image = Image.fromarray(base, "RGBA")
     if request.overlay and request.overlay != "rgb":
-        overlay = rgba_from_raster(product_raster(request.overlay, request.year), request.bbox, request.width, request.height)
+        overlay = rgba_from_raster(
+            product_raster(request.overlay, request.year),
+            request.bbox,
+            request.width,
+            request.height,
+            request.overlay,
+        )
         image = Image.alpha_composite(image, Image.fromarray(overlay, "RGBA"))
     output = BytesIO()
     if request.format == "webp":

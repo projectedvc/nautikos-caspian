@@ -41,9 +41,7 @@ done
 for pid_file in data-tunnel-v2.pid data-tunnel-v2b.pid data-tunnel-v3.pid; do
   stop_owned_process "$WORK_ROOT/$pid_file" "cloudflared"
 done
-stop_owned_process "$WORK_ROOT/download-earth-search.pid" "download_earth_search.py"
-stop_owned_process "$WORK_ROOT/data-build-v4.pid" "download_earth_search.py"
-stop_owned_process "$WORK_ROOT/radar-build-v1.pid" "download_earth_search.py"
+stop_owned_process "$WORK_ROOT/cog-build-v1.pid" "build_cog_products.py"
 sleep 2
 
 export NAUTIKOS_DATA_ROOT="$DATA_ROOT"
@@ -76,39 +74,17 @@ for _ in $(seq 1 30); do
 done
 printf '%s\n' "${TUNNEL_URL:-}" > "$WORK_ROOT/data-tunnel-v3-url.txt"
 
-# Resume-safe localization followed by one-time preparation of all historical
-# RGB and environmental overlays used by the browser. Normal map use then
-# reads only finished local files.
-nohup bash -lc "cd '$APP_ROOT' && \
-  '$PYTHON_BIN' server/scripts/download_earth_search.py \
-    --years 2020:2026 \
-    --catalog-root server/seed-data/catalog/sentinel-2-earth-search \
-    --data-root '$DATA_ROOT' --workers 3 && \
-  '$PYTHON_BIN' server/scripts/prewarm_cache.py \
-    --api 'http://127.0.0.1:$API_PORT' \
-    --years 2020:2026 \
-    --products rgb,water_colour,water_extent,turbidity,suspended_matter,vegetation,soil_stress \
-    --zooms 3:9 --workers 2" \
-  > "$WORK_ROOT/data-build-v4.log" 2>&1 &
-echo $! > "$WORK_ROOT/data-build-v4.pid"
-
-# Sentinel-1 is downloaded independently at one stream so the much smaller
-# optical presentation cache remains responsive. The resulting SAR dark-spot
-# layer is a candidate screen and is never described as proof of oil.
-nohup bash -lc "cd '$APP_ROOT' && \
-  '$PYTHON_BIN' server/scripts/download_earth_search.py \
-    --years 2020:2026 --assets vv \
-    --catalog-root server/seed-data/catalog/sentinel-1-earth-search \
-    --catalog-name sentinel-1-earth-search \
-    --data-root '$DATA_ROOT' --workers 1 && \
-  '$PYTHON_BIN' server/scripts/prewarm_cache.py \
-    --api 'http://127.0.0.1:$API_PORT' \
-    --years 2020:2026 --products oil_candidates \
-    --zooms 3:9 --workers 1" \
-  > "$WORK_ROOT/radar-build-v1.log" 2>&1 &
-echo $! > "$WORK_ROOT/radar-build-v1.pid"
+# One resume-safe builder owns the six schema-3 analytical COGs. Set
+# NAUTIKOS_RUN_COG_BUILDER=0 when this bootstrap should only restart the API.
+if [[ "${NAUTIKOS_RUN_COG_BUILDER:-1}" == "1" ]]; then
+  nohup "$PYTHON_BIN" server/scripts/build_cog_products.py \
+    --years 2020:2026 --products all \
+    --data-root "$DATA_ROOT" --workers "${NAUTIKOS_COG_WORKERS:-2}" \
+    --continue-on-error \
+    > "$WORK_ROOT/cog-build-v1.log" 2>&1 &
+  echo $! > "$WORK_ROOT/cog-build-v1.pid"
+fi
 
 echo "Nautikos API: http://127.0.0.1:$API_PORT"
 echo "Public tunnel: ${TUNNEL_URL:-not-ready; inspect $WORK_ROOT/data-tunnel-v3.log}"
-echo "Build log: $WORK_ROOT/data-build-v4.log"
-echo "Radar log: $WORK_ROOT/radar-build-v1.log"
+echo "COG build log: $WORK_ROOT/cog-build-v1.log"

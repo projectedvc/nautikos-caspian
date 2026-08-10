@@ -1,5 +1,6 @@
 {
-  "schema": 2,
+  "schema": 3,
+  "mode": "local-only",
   "comparison": {
     "years": [2020, 2021, 2022, 2023, 2024, 2025, 2026],
     "month": 7,
@@ -8,41 +9,67 @@
     "bbox_wgs84": [46.0, 36.0, 55.8, 47.4]
   },
   "products": {
-    "rgb": {
-      "source": "sentinel-2-global-mosaics",
-      "bands": ["B04", "B03", "B02"],
-      "resolution_m": 10,
-      "scope": "all"
-    },
-    "water_extent": {
-      "source": "sentinel-2-global-mosaics",
+    "rivers": {
+      "satellite": "Sentinel-2 MSI",
+      "source": "sentinel-2-l2a",
       "bands": ["B03", "B08"],
       "formula": "(B03-B08)/(B03+B08)",
-      "resolution_m": 10,
-      "scope": "water-and-coast"
+      "measurement": "NDWI, open-water and river response",
+      "units": "index",
+      "range": [-0.15, 0.75],
+      "threshold": 0.02,
+      "resolution_m": 10
     },
-    "vegetation": {
-      "source": "sentinel-2-global-mosaics",
+    "water_extent": {
+      "satellite": "Sentinel-2 MSI",
+      "source": "sentinel-2-l2a",
+      "bands": ["B03", "B08"],
+      "formula": "(B03-B08)/(B03+B08)",
+      "measurement": "NDWI, annual water extent",
+      "units": "index",
+      "range": [-0.15, 0.75],
+      "threshold": 0.01,
+      "resolution_m": 10
+    },
+    "coastal_vegetation": {
+      "satellite": "Sentinel-2 MSI",
+      "source": "sentinel-2-l2a",
       "bands": ["B04", "B08"],
       "formula": "(B08-B04)/(B08+B04)",
-      "resolution_m": 10,
-      "scope": "land-and-coast"
-    },
-    "chlorophyll": {
-      "source": "sentinel-3-olci-l2-wfr",
-      "resolution_m": 300,
-      "scope": "water"
-    },
-    "suspended_matter": {
-      "source": "sentinel-3-olci-l2-wfr",
-      "resolution_m": 300,
-      "scope": "water"
+      "measurement": "NDVI, coastal vegetation",
+      "units": "index",
+      "range": [-0.1, 0.85],
+      "threshold": 0.05,
+      "resolution_m": 10
     },
     "oil_candidates": {
+      "satellite": "Sentinel-1 C-SAR",
       "source": "sentinel-1-grd",
+      "bands": ["VV"],
+      "measurement": "Local-background backscatter contrast",
+      "units": "dB contrast",
+      "range": [3.5, 10.0],
+      "threshold": 3.5,
       "resolution_m": 20,
-      "scope": "water",
-      "warning": "Dark-spot screening only; wind, AIS and repeat acquisition are required."
+      "warning": "Dark-spot candidates only; wind, AIS and repeat acquisition are required for confirmation."
+    },
+    "water_temperature": {
+      "satellite": "Sentinel-3 SLSTR",
+      "source": "sentinel-3-slstr-l2-wst",
+      "bands": ["WST"],
+      "measurement": "Sea/water surface temperature",
+      "units": "degC",
+      "range": [-2.0, 35.0],
+      "resolution_m": 1000
+    },
+    "water_colour": {
+      "satellite": "Sentinel-3 OLCI",
+      "source": "sentinel-3-olci-l2-water",
+      "bands": ["TSM_NN"],
+      "measurement": "Total suspended matter / water-colour proxy",
+      "units": "log10(g/m^3)",
+      "range": [-2.5, 3.0],
+      "resolution_m": 300
     }
   }
 }
