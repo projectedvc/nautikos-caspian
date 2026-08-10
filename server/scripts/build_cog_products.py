@@ -175,18 +175,17 @@ OLCI_TSM_EVALSCRIPT = r"""//VERSION=3
 function setup() {
   return {
     input: [{bands: ["TSM_NN", "dataMask"]}],
-    mosaicking: "ORBIT",
+    // Copernicus Browser renders one deterministic least-cloudy mosaic for
+    // the selected period.  ORBIT would evaluate every OLCI acquisition in
+    // July for every output pixel, consuming hundreds of processing units per
+    // tile and producing a temporal average that does not match Browser.
+    mosaicking: "SIMPLE",
     output: {bands: 2, sampleType: "FLOAT32"}
   };
 }
-function evaluatePixel(samples) {
-  var sum = 0.0, count = 0;
-  for (var i = 0; i < samples.length; i++) {
-    if (!samples[i].dataMask || !isFinite(samples[i].TSM_NN)) continue;
-    sum += samples[i].TSM_NN;
-    count++;
-  }
-  return count ? [sum / count, 1] : [-9999, 0];
+function evaluatePixel(sample) {
+  if (!sample.dataMask || !isFinite(sample.TSM_NN)) return [-9999, 0];
+  return [sample.TSM_NN, 1];
 }
 """
 
@@ -270,7 +269,7 @@ PRODUCTS: dict[str, ProductSpec] = {
         "OLCI L2 WATER total suspended matter (TSM_NN)",
         "log10(g/m^3)",
         300,
-        "July valid-pixel mean of official OLCI L2 TSM_NN",
+        "July least-cloudy Copernicus mosaic of official OLCI L2 TSM_NN",
         OLCI_TSM_EVALSCRIPT,
     ),
 }

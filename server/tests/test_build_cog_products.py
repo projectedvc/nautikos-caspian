@@ -37,6 +37,12 @@ class CogProductBuilderTests(unittest.TestCase):
         for product in ("rivers", "water_extent", "coastal_vegetation"):
             self.assertEqual(builder.PRODUCTS[product].source, "sentinel-2-l2a")
         self.assertIn("TSM_NN", builder.PRODUCTS["water_colour"].evalscript)
+        self.assertIn('mosaicking: "SIMPLE"', builder.PRODUCTS["water_colour"].evalscript)
+        self.assertNotIn('mosaicking: "ORBIT"', builder.PRODUCTS["water_colour"].evalscript)
+        self.assertIn(
+            "least-cloudy Copernicus mosaic",
+            builder.PRODUCTS["water_colour"].algorithm,
+        )
         self.assertEqual(
             builder.PRODUCTS["water_temperature"].source_collection,
             "sentinel-3-sl-2-wst-ntc",
