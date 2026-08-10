@@ -171,7 +171,10 @@ class CatalogRenderer:
         return self.settings.nautikos_data_root / "spectral-local-v1" / str(year) / str(z) / str(x) / f"{y}.npz"
 
     def local_filter_cache_path(self, product: str, year: int, z: int, x: int, y: int) -> Path:
-        return self.settings.nautikos_data_root / "tiles-local-v1" / product / str(year) / str(z) / str(x) / f"{y}.png"
+        # v2 replaces the old painted masks with fixed spectral renderings.
+        # Keeping a new immutable namespace avoids serving any cached striped
+        # tiles while the local archive is being completed.
+        return self.settings.nautikos_data_root / "tiles-local-v2" / product / str(year) / str(z) / str(x) / f"{y}.png"
 
     def _lock(self, key: str) -> threading.Lock:
         with self._locks_guard:
@@ -598,25 +601,32 @@ class CatalogRenderer:
         if product == "water_colour":
             return np.dstack([stretch(red), stretch(green), stretch(blue), water.astype(np.uint8) * 235])
         if product == "water_extent":
+            # A water-area fill makes small radiometric differences between
+            # neighbouring Sentinel granules look like large rectangular
+            # anomalies.  For comparison we need the measured water boundary:
+            # derive it from adjacent valid NDWI decisions and draw one fixed
+            # colour, never a per-scene opacity stretch.
+            boundary = np.zeros_like(water)
+            horizontal = valid[:, 1:] & valid[:, :-1] & (water[:, 1:] != water[:, :-1])
+            vertical = valid[1:, :] & valid[:-1, :] & (water[1:, :] != water[:-1, :])
+            boundary[:, 1:] |= horizontal
+            boundary[:, :-1] |= horizontal
+            boundary[1:, :] |= vertical
+            boundary[:-1, :] |= vertical
+            boundary = gaussian_smooth(boundary.astype(np.float32), 1.15) > 0.035
             rgba = np.zeros((TILE_SIZE, TILE_SIZE, 4), dtype=np.uint8)
-            strength = np.clip((ndwi + 0.02) / 0.55, 0, 1)
-            rgba[..., 0] = (18 + strength * 12).astype(np.uint8)
-            rgba[..., 1] = (112 + strength * 76).astype(np.uint8)
-            rgba[..., 2] = (176 + strength * 65).astype(np.uint8)
-            rgba[..., 3] = np.where(water, 70 + strength * 150, 0).astype(np.uint8)
+            rgba[..., 0] = 255
+            rgba[..., 1] = 198
+            rgba[..., 2] = 32
+            rgba[..., 3] = boundary.astype(np.uint8) * 235
             return rgba
         if product == "rivers":
-            # Suppress the homogeneous interior of large open-water bodies.
-            # Narrow waterways and their real NDWI edges remain bright red.
-            local_water_fraction = gaussian_smooth(water.astype(np.float32), 5.0)
-            waterways = water & (local_water_fraction < 0.94)
-            strength = np.clip((ndwi - 0.02) / 0.45, 0, 1)
-            rgba = np.zeros((TILE_SIZE, TILE_SIZE, 4), dtype=np.uint8)
-            rgba[..., 0] = 246
-            rgba[..., 1] = (78 - strength * 48).astype(np.uint8)
-            rgba[..., 2] = (70 - strength * 42).astype(np.uint8)
-            rgba[..., 3] = np.where(waterways, 70 + strength * 175, 0).astype(np.uint8)
-            return rgba
+            # Standard Sentinel-2 colour infrared composite (B08/B04/B03).
+            # Vegetation is red and water is dark, so rivers and tributaries
+            # remain visible as real spectral structures instead of a painted
+            # red outline.  Fixed reflectance stretches keep years comparable.
+            alpha = valid.astype(np.uint8) * 255
+            return np.dstack([stretch(nir), stretch(red), stretch(green), alpha])
         if product == "turbidity":
             ndti = (red - green) / (red + green + epsilon)
             return ramp(ndti, water, -0.12, 0.22, anomaly_only=True)
@@ -635,14 +645,14 @@ class CatalogRenderer:
             return rgba
         if product == "coastal_vegetation":
             ndvi = (nir - red) / (nir + red + epsilon)
-            near_water = gaussian_smooth(water.astype(np.float32), 7.0) > 0.003
-            coastal = valid & ~water & near_water & (ndvi > 0.08)
-            strength = np.clip((ndvi - 0.08) / 0.72, 0, 1)
+            near_water = gaussian_smooth(water.astype(np.float32), 14.0) > 0.001
+            coastal = valid & ~water & near_water & (ndvi > 0.16)
+            strength = np.clip((ndvi - 0.16) / 0.64, 0, 1)
             rgba = np.zeros((TILE_SIZE, TILE_SIZE, 4), dtype=np.uint8)
-            rgba[..., 0] = (206 - strength * 166).astype(np.uint8)
-            rgba[..., 1] = (118 + strength * 114).astype(np.uint8)
-            rgba[..., 2] = (48 + strength * 35).astype(np.uint8)
-            rgba[..., 3] = np.where(coastal, 50 + strength * 190, 0).astype(np.uint8)
+            rgba[..., 0] = (62 - strength * 38).astype(np.uint8)
+            rgba[..., 1] = (168 + strength * 82).astype(np.uint8)
+            rgba[..., 2] = (65 - strength * 40).astype(np.uint8)
+            rgba[..., 3] = np.where(coastal, 90 + strength * 145, 0).astype(np.uint8)
             return rgba
         if product == "soil_stress":
             ndvi = (nir - red) / (nir + red + epsilon)

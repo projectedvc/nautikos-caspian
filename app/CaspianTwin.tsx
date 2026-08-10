@@ -106,12 +106,12 @@ const allFilters: FilterDefinition[] = [
   {
     id: "rivers",
     label: "Реки и водотоки",
-    subtitle: "Sentinel‑2 L2A · медиана июля · NDWI B03/B08 · 10 м",
+    subtitle: "Sentinel‑2 L2A · цветной инфракрасный B08/B04/B03 · 10 м",
     dataset: "s2",
     layer: "rivers",
     icon: Waves,
-    legend: [{ color: "#f03b20", label: "красный · открытая вода по NDWI" }],
-    explanation: "Красным показана открытая вода, выделенная индексом NDWI (B03−B08)/(B03+B08) по медианному июльскому композиту облачно отфильтрованных сцен Sentinel‑2 L2A. Слой помогает увидеть различимые со спутника водотоки и устья, но не является официальной речной сетью: узкие русла и вода под растительностью могут не определяться.",
+    legend: [{ color: "#8f1424", label: "красный · живая растительность" }, { color: "#071728", label: "тёмный · вода и русла" }],
+    explanation: "Настоящий цветной инфракрасный композит Sentinel‑2: ближний ИК B08 выведен в красный канал, B04 — в зелёный, B03 — в синий. Здоровая растительность становится красной, а вода — тёмной, поэтому русла, притоки, устья и влажные поймы читаются как реальные спектральные структуры снимка, без нарисованных масок и прямоугольных заливок.",
   },
   {
     id: "shoreline",
@@ -120,8 +120,8 @@ const allFilters: FilterDefinition[] = [
     dataset: "s2",
     layer: "shoreline",
     icon: ScanSearch,
-    legend: [{ color: "#3182bd", label: "наблюдаемая площадь воды" }, { color: "#ffc62a", label: "граница воды выбранного года" }],
-    explanation: "Площадь воды и её граница рассчитаны по NDWI из медианного июльского композита Sentinel‑2 L2A. Шторка сравнивает одинаковый сезон разных лет и показывает наблюдаемое отступление или наступление воды. Слой не устанавливает причину изменения: уровень моря, влажный грунт, волны и смешанные береговые пиксели требуют дополнительной проверки.",
+    legend: [{ color: "#ffc620", label: "измеренная граница воды выбранного года" }],
+    explanation: "Жёлтая линия построена только по переходу между водой и сушей в реальном NDWI‑поле Sentinel‑2. Внутренняя площадь моря не закрашивается. Шторка сопоставляет одну и ту же методику для двух лет и показывает отступление или наступление воды без искусственной береговой геометрии.",
   },
   {
     id: "coastalVegetation",
@@ -391,7 +391,7 @@ export default function CaspianTwin() {
   const [compareEnabled, setCompareEnabled] = useState(true);
   // Bump when a raster contract changes so browsers do not retain tiles from
   // an older product or visualisation contract.
-  const tileVersion = 32;
+  const tileVersion = 33;
   const [timelapseFromYear, setTimelapseFromYear] = useState(2020);
   const [timelapseToYear, setTimelapseToYear] = useState(2026);
   const [timelapseYear, setTimelapseYear] = useState(2020);

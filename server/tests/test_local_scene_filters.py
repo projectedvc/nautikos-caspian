@@ -53,22 +53,23 @@ class LocalSceneFilterTests(unittest.TestCase):
             self.assertFalse(self.renderer._local_raster_is_valid(error_asset))
             self.assertTrue(self.renderer._local_raster_is_valid(valid_asset))
 
-    def test_river_overlay_is_transparent_red_ndwi_response(self) -> None:
-        self.arrays["B03"][112:144, 20:236] = 2400.0
-        self.arrays["B08"][112:144, 20:236] = 250.0
+    def test_river_filter_is_fixed_colour_infrared_composite(self) -> None:
         rgba = self.renderer._rgba("rivers", self.arrays, self.valid)
-        visible = rgba[..., 3] > 0
-        self.assertGreater(int(visible.sum()), 0)
-        self.assertTrue(np.all(rgba[..., 0][visible] > rgba[..., 1][visible]))
+        self.assertEqual(int(rgba[..., 3].min()), 255)
+        self.assertGreater(int(rgba[..., 0].mean()), int(rgba[..., 1].mean()))
+        self.valid[20, 20] = False
+        rgba = self.renderer._rgba("rivers", self.arrays, self.valid)
         self.assertEqual(int(rgba[20, 20, 3]), 0)
 
-    def test_water_extent_uses_ndwi_strength_without_artificial_outline(self) -> None:
+    def test_water_extent_draws_only_fixed_boundary_without_area_fill(self) -> None:
         self.arrays["B03"][:, :128] = 2200.0
         self.arrays["B08"][:, :128] = 300.0
         rgba = self.renderer._rgba("water_extent", self.arrays, self.valid)
-        self.assertGreater(int(rgba[:, :128, 3].mean()), 0)
-        self.assertEqual(int(rgba[:, 200:, 3].max()), 0)
-        self.assertGreater(int(rgba[:, :128, 2].mean()), int(rgba[:, :128, 0].mean()))
+        self.assertEqual(int(rgba[:, :90, 3].max()), 0)
+        self.assertGreater(int(rgba[:, 124:132, 3].max()), 0)
+        visible = rgba[..., 3] > 0
+        self.assertTrue(np.all(rgba[..., 0][visible] == 255))
+        self.assertTrue(np.all(rgba[..., 1][visible] == 198))
 
     def test_coastal_vegetation_is_limited_to_water_neighbourhood(self) -> None:
         self.arrays["B03"][:, :80] = 2300.0
