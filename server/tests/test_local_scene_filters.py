@@ -4,6 +4,7 @@ import sys
 import unittest
 from types import SimpleNamespace
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 
@@ -40,6 +41,17 @@ class LocalSceneFilterTests(unittest.TestCase):
             LOCAL_SCENE_PRODUCTS,
             {"rivers", "water_extent", "coastal_vegetation", "oil_candidates"},
         )
+
+    def test_local_asset_guard_rejects_error_body_with_tif_suffix(self) -> None:
+        CatalogRenderer._local_raster_is_valid.cache_clear()
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            error_asset = root / "failed.tif"
+            error_asset.write_bytes(b"<Error>expired or incomplete download</Error>" * 40)
+            valid_asset = root / "valid.tif"
+            valid_asset.write_bytes(b"II*\x00" + b"\x00" * 2048)
+            self.assertFalse(self.renderer._local_raster_is_valid(error_asset))
+            self.assertTrue(self.renderer._local_raster_is_valid(valid_asset))
 
     def test_river_overlay_is_transparent_red_ndwi_response(self) -> None:
         self.arrays["B03"][112:144, 20:236] = 2400.0

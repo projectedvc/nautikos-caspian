@@ -203,14 +203,35 @@ class CatalogRenderer:
         for name in ("B02", "B03", "B04", "B08", "scl"):
             asset = assets.get(name)
             local = self._local_asset_path(asset) if asset else None
-            if local is None or not local.is_file():
+            if local is None or not self._local_raster_is_valid(local):
                 return False
         return True
+
+    @staticmethod
+    @lru_cache(maxsize=65_536)
+    def _local_raster_is_valid(path: Path) -> bool:
+        """Reject incomplete/error downloads before they enter a mosaic.
+
+        The background downloader writes assets by their source-URL hash.  A
+        failed HTTP response can therefore exist at the final ``.tif`` path
+        even though it is HTML/XML rather than a GeoTIFF.  Checking only
+        ``is_file()`` made one such object break the whole SAR layer.  TIFF
+        and BigTIFF both have a deterministic four-byte signature, so this
+        guard is cheap enough to run across every local catalogue item.
+        """
+        try:
+            if not path.is_file() or path.stat().st_size < 1_024:
+                return False
+            with path.open("rb") as stream:
+                signature = stream.read(4)
+        except OSError:
+            return False
+        return signature in {b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+"}
 
     def _asset_is_local(self, item: dict, name: str) -> bool:
         asset = item.get("assets", {}).get(name)
         local = self._local_asset_path(asset) if asset else None
-        return bool(local and local.is_file() and local.stat().st_size > 0)
+        return bool(local and self._local_raster_is_valid(local))
 
     @staticmethod
     def _footprint_area(item: dict) -> float:
