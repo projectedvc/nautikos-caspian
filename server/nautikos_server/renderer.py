@@ -33,6 +33,13 @@ SUPPORTED_PRODUCTS = {
     "oil_candidates",
 }
 
+LOCAL_SCENE_PRODUCTS = {
+    "rivers",
+    "water_extent",
+    "coastal_vegetation",
+    "oil_candidates",
+}
+
 
 def tile_bounds(z: int, x: int, y: int) -> tuple[float, float, float, float]:
     tiles = 1 << z
@@ -160,6 +167,12 @@ class CatalogRenderer:
         """
         return self.settings.nautikos_data_root / "spectral-v2" / str(year) / str(z) / str(x) / f"{y}.npz"
 
+    def local_spectral_cache_path(self, year: int, z: int, x: int, y: int) -> Path:
+        return self.settings.nautikos_data_root / "spectral-local-v1" / str(year) / str(z) / str(x) / f"{y}.npz"
+
+    def local_filter_cache_path(self, product: str, year: int, z: int, x: int, y: int) -> Path:
+        return self.settings.nautikos_data_root / "tiles-local-v1" / product / str(year) / str(z) / str(x) / f"{y}.png"
+
     def _lock(self, key: str) -> threading.Lock:
         with self._locks_guard:
             return self._locks.setdefault(key, threading.Lock())
@@ -193,6 +206,48 @@ class CatalogRenderer:
             if local is None or not local.is_file():
                 return False
         return True
+
+    def _asset_is_local(self, item: dict, name: str) -> bool:
+        asset = item.get("assets", {}).get(name)
+        local = self._local_asset_path(asset) if asset else None
+        return bool(local and local.is_file() and local.stat().st_size > 0)
+
+    @staticmethod
+    def _footprint_area(item: dict) -> float:
+        bbox = item.get("bbox") or (0, 0, 0, 0)
+        return max(0.0, float(bbox[2]) - float(bbox[0])) * max(0.0, float(bbox[3]) - float(bbox[1]))
+
+    @lru_cache(maxsize=14)
+    def stable_local_spectral_items(self, year: int) -> tuple[dict, ...]:
+        """Pin two real local acquisitions per MGRS grid for every zoom.
+
+        The selection is frozen for the life of the API process. Download
+        progress therefore cannot swap scenes while the user zooms or moves
+        the swipe divider.
+        """
+        grouped: dict[str, list[dict]] = {}
+        for item in self.catalog(year).get("items", []):
+            if not self._item_is_local(item):
+                continue
+            grouped.setdefault(str(item.get("grid") or item.get("id")), []).append(item)
+        selected: list[dict] = []
+        for group in grouped.values():
+            group.sort(
+                key=lambda item: (
+                    -self._footprint_area(item),
+                    float(item.get("cloud_cover", 1000.0)),
+                    str(item.get("datetime", "")),
+                )
+            )
+            selected.extend(group[:2])
+        return tuple(selected)
+
+    @lru_cache(maxsize=14)
+    def stable_local_radar_items(self, year: int) -> tuple[dict, ...]:
+        return tuple(
+            item for item in self.radar_catalog(year).get("items", [])
+            if self._asset_is_local(item, "vv")
+        )
 
     def _read_asset(
         self,
@@ -346,25 +401,53 @@ class CatalogRenderer:
                     valid = stored["valid"].astype(bool)
                 return arrays, valid
 
-            # A whole-Caspian low-zoom tile can intersect hundreds of scenes.
-            # Three dates per MGRS grid are valuable near the coast, but at an
-            # overview zoom they triple IO without adding visible detail. Use
-            # the least-cloudy fixed scene per grid there; detailed zooms keep
-            # all three acquisitions for cloud-gap filling.
+            # A whole-Caspian low-zoom tile can intersect most of the Caspian scene grid. Opening
+            # independent COG ranges concurrently removes request latency while the
+            # CDSE account bandwidth limit still caps total transfer safely.
             if z <= 7:
                 grouped: dict[str, list[dict]] = {}
                 for item in items:
                     grouped.setdefault(str(item.get("grid") or item.get("id")), []).append(item)
-                # Prefer an already-local acquisition for every footprint.
-                # This keeps presentation requests independent from the long
-                # archive download while retaining one real Sentinel scene per
-                # grid. Only a not-yet-local grid falls back to a remote COG.
                 items = [next((item for item in group if self._item_is_local(item)), group[0]) for group in grouped.values()]
             else:
                 local_items = [item for item in items if self._item_is_local(item)]
                 if local_items:
                     items = local_items
 
+            arrays, valid, water_probability = self._mosaic(items, ("B02", "B03", "B04", "B08"), bounds)
+            arrays["water_probability"] = water_probability
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            temporary = cache.with_suffix(f".{threading.get_ident()}.tmp.npz")
+            np.savez_compressed(temporary, **arrays, valid=valid.astype(np.uint8))
+            temporary.replace(cache)
+            return arrays, valid
+
+    def _local_spectral_mosaic(
+        self,
+        year: int,
+        z: int,
+        x: int,
+        y: int,
+        bounds: tuple[float, float, float, float],
+    ) -> tuple[dict[str, np.ndarray], np.ndarray]:
+        cache = self.local_spectral_cache_path(year, z, x, y)
+        if cache.is_file():
+            with np.load(cache) as stored:
+                arrays = {name: stored[name] for name in ("B02", "B03", "B04", "B08", "water_probability")}
+                return arrays, stored["valid"].astype(bool)
+        key = f"spectral-local-v1/{year}/{z}/{x}/{y}"
+        with self._lock(key):
+            if cache.is_file():
+                with np.load(cache) as stored:
+                    arrays = {name: stored[name] for name in ("B02", "B03", "B04", "B08", "water_probability")}
+                    return arrays, stored["valid"].astype(bool)
+            geographic = transform_bounds("EPSG:3857", "EPSG:4326", *bounds, densify_pts=21)
+            items = [
+                item for item in self.stable_local_spectral_items(year)
+                if item.get("bbox") and intersects(item["bbox"], geographic)
+            ]
+            if not items:
+                raise FileNotFoundError(f"no pinned local Sentinel-2 scene intersects {year}/{z}/{x}/{y}")
             arrays, valid, water_probability = self._mosaic(items, ("B02", "B03", "B04", "B08"), bounds)
             arrays["water_probability"] = water_probability
             cache.parent.mkdir(parents=True, exist_ok=True)
@@ -417,7 +500,7 @@ class CatalogRenderer:
         geographic = transform_bounds("EPSG:3857", "EPSG:4326", *bounds, densify_pts=21)
         radar_items = [
             item
-            for item in self.radar_catalog(year)["items"]
+            for item in self.stable_local_radar_items(year)
             if item.get("bbox") and intersects(item["bbox"], geographic)
         ]
         if not radar_items:
@@ -440,11 +523,12 @@ class CatalogRenderer:
         fine = gaussian_smooth(filled, 1.4)
         background = gaussian_smooth(filled, 7.0)
         dark = np.clip(background - fine, 0, None)
-        low, high = np.percentile(dark[water], (82, 99.5))
-        score = np.clip((dark - low) / max(high - low, 1e-4), 0, 1)
-        # A weak response is commonly caused by speckle or acquisition seams.
-        # Only the upper coherent tail is exposed to the incident workflow.
-        candidate = water & (score > 0.48)
+        # The Copernicus workflow treats pixels more than 3.5 dB darker than
+        # their local background as candidates. A fixed physical threshold is
+        # stable across tile boundaries and years; no per-tile percentile is
+        # allowed here.
+        score = np.clip((dark - 3.5) / 6.0, 0, 1)
+        candidate = water & (dark > 3.5)
         # Remove thin scan/speckle traces. Operational slick candidates must
         # form a spatially coherent patch at the current map scale, not a
         # one-pixel line. The larger dilation restores the footprint after
@@ -494,11 +578,23 @@ class CatalogRenderer:
             return np.dstack([stretch(red), stretch(green), stretch(blue), water.astype(np.uint8) * 235])
         if product == "water_extent":
             rgba = np.zeros((TILE_SIZE, TILE_SIZE, 4), dtype=np.uint8)
-            rgba[water] = (13, 128, 174, 205)
-            edge = water & (
-                ~np.roll(water, 1, 0) | ~np.roll(water, -1, 0) | ~np.roll(water, 1, 1) | ~np.roll(water, -1, 1)
-            )
-            rgba[edge] = (255, 198, 42, 245)
+            strength = np.clip((ndwi + 0.02) / 0.55, 0, 1)
+            rgba[..., 0] = (18 + strength * 12).astype(np.uint8)
+            rgba[..., 1] = (112 + strength * 76).astype(np.uint8)
+            rgba[..., 2] = (176 + strength * 65).astype(np.uint8)
+            rgba[..., 3] = np.where(water, 70 + strength * 150, 0).astype(np.uint8)
+            return rgba
+        if product == "rivers":
+            # Suppress the homogeneous interior of large open-water bodies.
+            # Narrow waterways and their real NDWI edges remain bright red.
+            local_water_fraction = gaussian_smooth(water.astype(np.float32), 5.0)
+            waterways = water & (local_water_fraction < 0.94)
+            strength = np.clip((ndwi - 0.02) / 0.45, 0, 1)
+            rgba = np.zeros((TILE_SIZE, TILE_SIZE, 4), dtype=np.uint8)
+            rgba[..., 0] = 246
+            rgba[..., 1] = (78 - strength * 48).astype(np.uint8)
+            rgba[..., 2] = (70 - strength * 42).astype(np.uint8)
+            rgba[..., 3] = np.where(waterways, 70 + strength * 175, 0).astype(np.uint8)
             return rgba
         if product == "turbidity":
             ndti = (red - green) / (red + green + epsilon)
@@ -515,6 +611,17 @@ class CatalogRenderer:
             rgba[..., 1] = (118 + scaled * 116).astype(np.uint8)
             rgba[..., 2] = (55 + scaled * 40).astype(np.uint8)
             rgba[..., 3] = land.astype(np.uint8) * 205
+            return rgba
+        if product == "coastal_vegetation":
+            ndvi = (nir - red) / (nir + red + epsilon)
+            near_water = gaussian_smooth(water.astype(np.float32), 7.0) > 0.003
+            coastal = valid & ~water & near_water & (ndvi > 0.08)
+            strength = np.clip((ndvi - 0.08) / 0.72, 0, 1)
+            rgba = np.zeros((TILE_SIZE, TILE_SIZE, 4), dtype=np.uint8)
+            rgba[..., 0] = (206 - strength * 166).astype(np.uint8)
+            rgba[..., 1] = (118 + strength * 114).astype(np.uint8)
+            rgba[..., 2] = (48 + strength * 35).astype(np.uint8)
+            rgba[..., 3] = np.where(coastal, 50 + strength * 190, 0).astype(np.uint8)
             return rgba
         if product == "soil_stress":
             ndvi = (nir - red) / (nir + red + epsilon)
@@ -543,6 +650,29 @@ class CatalogRenderer:
             # used because their independent per-scene display stretches are
             # the source of visible dark/bright strips.
             arrays, valid = self._spectral_mosaic(year, z, x, y, items, bounds)
+            rgba = (
+                self._oil_candidates(year, z, x, y, bounds, arrays, valid)
+                if product == "oil_candidates"
+                else self._rgba(product, arrays, valid)
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary = destination.with_suffix(f".{threading.get_ident()}.tmp")
+            Image.fromarray(rgba, "RGBA").save(temporary, format="PNG", optimize=True)
+            temporary.replace(destination)
+            return destination
+
+    def render_local_filter(self, product: str, year: int, z: int, x: int, y: int) -> Path:
+        if product not in LOCAL_SCENE_PRODUCTS:
+            raise ValueError(f"unsupported local scene product: {product}")
+        destination = self.local_filter_cache_path(product, year, z, x, y)
+        if destination.is_file():
+            return destination
+        key = f"filter-local-v1/{product}/{year}/{z}/{x}/{y}"
+        with self._lock(key):
+            if destination.is_file():
+                return destination
+            bounds = tile_bounds(z, x, y)
+            arrays, valid = self._local_spectral_mosaic(year, z, x, y, bounds)
             rgba = (
                 self._oil_candidates(year, z, x, y, bounds, arrays, valid)
                 if product == "oil_candidates"

@@ -28,7 +28,7 @@ from .local_products import (
     LocalProductStore,
     LocalProductUnavailable,
 )
-from .renderer import CatalogRenderer
+from .renderer import LOCAL_SCENE_PRODUCTS, CatalogRenderer
 from .settings import get_settings
 
 
@@ -183,6 +183,24 @@ def tile(product: str, year: int, z: str, x: str, y: str, extension: Literal["we
         try:
             payload = local_products.render_xyz_png(product, year, int(z), int(x), int(y))
         except LocalProductUnavailable as exc:
+            if product in LOCAL_SCENE_PRODUCTS:
+                try:
+                    with render_slots:
+                        path = renderer.render_local_filter(product, year, int(z), int(x), int(y))
+                except FileNotFoundError as scene_exc:
+                    raise HTTPException(status_code=404, detail=str(scene_exc)) from scene_exc
+                except ValueError as scene_exc:
+                    raise HTTPException(status_code=400, detail=str(scene_exc)) from scene_exc
+                except Exception as scene_exc:
+                    raise HTTPException(status_code=503, detail=f"Local scene tile is temporarily unavailable: {scene_exc}") from scene_exc
+                return FileResponse(
+                    path,
+                    media_type="image/png",
+                    headers={
+                        "Cache-Control": "public, max-age=31536000, immutable",
+                        "X-Nautikos-Source": "local-pinned-scenes",
+                    },
+                )
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except InvalidLocalProduct as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
