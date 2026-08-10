@@ -59,6 +59,8 @@ test("uses the local Jupyter COG service, six real Copernicus filters and AOI to
   assert.doesNotMatch(component, /GROQ_API_KEY/);
 
   assert.match(basemapRoute, /REGIONAL-SATELLITE-CONTEXT/);
+  assert.match(basemapRoute, /upstream\.arrayBuffer\(\)/);
+  assert.doesNotMatch(basemapRoute, /next:\s*\{\s*revalidate/);
   assert.doesNotMatch(basemapRoute, /writeFile|mkdir/);
   const products = JSON.parse(productConfig).products;
   assert.deepEqual(Object.keys(products).sort(), [

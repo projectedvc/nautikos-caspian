@@ -17,13 +17,18 @@ export async function GET(request: Request) {
   // versioned local Sentinel archive on the Jupyter data server.
   const upstream = await fetch(
     `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
-    { headers: { "user-agent": "Nautikos-Caspian/1.0" }, next: { revalidate: 2_592_000 } },
+    { headers: { accept: "image/avif,image/webp,image/jpeg,image/*" } },
   );
   if (!upstream.ok) return new Response(null, { status: upstream.status, headers: { "cache-control": "no-store" } });
   const headers = new Headers(upstream.headers);
   headers.set("cache-control", "public, s-maxage=2592000, stale-while-revalidate=604800");
   headers.set("x-nautikos-source", "REGIONAL-SATELLITE-CONTEXT");
-  return new Response(upstream.body, {
+  // Buffer the small 256px JPEG before returning it.  Some serverless
+  // runtimes cannot pass an upstream Web ReadableStream through their edge
+  // response adapter and turn an otherwise valid Esri 200 into a generic
+  // platform 500.
+  const body = await upstream.arrayBuffer();
+  return new Response(body, {
     headers: {
       "content-type": headers.get("content-type") ?? "image/jpeg",
       "cache-control": headers.get("cache-control")!,
