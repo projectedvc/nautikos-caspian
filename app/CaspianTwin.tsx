@@ -754,39 +754,77 @@ export default function CaspianTwin() {
     setSwipe(Math.max(3, Math.min(97, (clientX - bounds.left) / bounds.width * 100)));
   }
 
-  function captureAoiImage() {
-    if (!aoiScreen || !mapRef.current) return null;
-    const sources = compareEnabled && compareMapRef.current
-      ? [mapRef.current.getCanvas(), compareMapRef.current.getCanvas()]
-      : [mapRef.current.getCanvas()];
-    const first = sources[0];
-    if (!first.clientWidth || !first.clientHeight || aoiScreen.width < 2 || aoiScreen.height < 2) return null;
+  async function captureAoiImage(targetAoi: BBox) {
+    if (aoiScreen && mapRef.current) {
+      try {
+        const sources = compareEnabled && compareMapRef.current
+          ? [mapRef.current.getCanvas(), compareMapRef.current.getCanvas()]
+          : [mapRef.current.getCanvas()];
+        const first = sources[0];
+        if (first.clientWidth && first.clientHeight && aoiScreen.width >= 2 && aoiScreen.height >= 2) {
+          const crop = sources.map((source) => {
+            const scaleX = source.width / Math.max(1, source.clientWidth);
+            const scaleY = source.height / Math.max(1, source.clientHeight);
+            const x = Math.max(0, Math.floor(aoiScreen.left * scaleX));
+            const y = Math.max(0, Math.floor(aoiScreen.top * scaleY));
+            const width = Math.max(1, Math.min(source.width - x, Math.ceil(aoiScreen.width * scaleX)));
+            const height = Math.max(1, Math.min(source.height - y, Math.ceil(aoiScreen.height * scaleY)));
+            return { source, x, y, width, height };
+          });
+          const maxWidthPerFrame = sources.length > 1 ? 640 : 1024;
+          const maxHeight = 900;
+          const scale = Math.min(1, maxWidthPerFrame / crop[0].width, maxHeight / crop[0].height);
+          const frameWidth = Math.max(1, Math.round(crop[0].width * scale));
+          const frameHeight = Math.max(1, Math.round(crop[0].height * scale));
+          const output = document.createElement("canvas");
+          output.width = frameWidth * crop.length;
+          output.height = frameHeight;
+          const context = output.getContext("2d");
+          if (context) {
+            context.fillStyle = "#102b35";
+            context.fillRect(0, 0, output.width, output.height);
+            crop.forEach((item, index) => {
+              context.drawImage(item.source, item.x, item.y, item.width, item.height, index * frameWidth, 0, frameWidth, frameHeight);
+            });
+            return output.toDataURL("image/jpeg", 0.84);
+          }
+        }
+      } catch {
+        // Cross-origin raster tiles can taint the WebGL canvas. In that case,
+        // request the same AOI from the local Jupyter export endpoint below.
+      }
+    }
 
-    const crop = sources.map((source) => {
-      const scaleX = source.width / Math.max(1, source.clientWidth);
-      const scaleY = source.height / Math.max(1, source.clientHeight);
-      const x = Math.max(0, Math.floor(aoiScreen.left * scaleX));
-      const y = Math.max(0, Math.floor(aoiScreen.top * scaleY));
-      const width = Math.max(1, Math.min(source.width - x, Math.ceil(aoiScreen.width * scaleX)));
-      const height = Math.max(1, Math.min(source.height - y, Math.ceil(aoiScreen.height * scaleY)));
-      return { source, x, y, width, height };
-    });
-    const maxWidthPerFrame = sources.length > 1 ? 640 : 1024;
-    const maxHeight = 900;
-    const scale = Math.min(1, maxWidthPerFrame / crop[0].width, maxHeight / crop[0].height);
-    const frameWidth = Math.max(1, Math.round(crop[0].width * scale));
-    const frameHeight = Math.max(1, Math.round(crop[0].height * scale));
-    const output = document.createElement("canvas");
-    output.width = frameWidth * crop.length;
-    output.height = frameHeight;
-    const context = output.getContext("2d");
-    if (!context) return null;
-    context.fillStyle = "#102b35";
-    context.fillRect(0, 0, output.width, output.height);
-    crop.forEach((item, index) => {
-      context.drawImage(item.source, item.x, item.y, item.width, item.height, index * frameWidth, 0, frameWidth, frameHeight);
-    });
-    return output.toDataURL("image/jpeg", 0.84);
+    const requestedOverlay = PRODUCT_BY_LAYER[activeFilter.layer];
+    for (const overlay of [requestedOverlay, null]) {
+      try {
+        const response = await fetch(`${DATA_API_BASE}/v2/aoi/export`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            bbox: targetAoi,
+            year: afterYear,
+            product: "rgb",
+            overlay,
+            width: 960,
+            height: 720,
+            format: "png",
+          }),
+        });
+        if (!response.ok) continue;
+        const blob = await response.blob();
+        if (!blob.size || blob.size > 5_000_000) continue;
+        return await new Promise<string | null>((resolve) => {
+          const reader = new FileReader();
+          reader.onerror = () => resolve(null);
+          reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+          reader.readAsDataURL(blob);
+        });
+      } catch {
+        // Try the RGB-only export before falling back to metrics-only analysis.
+      }
+    }
+    return null;
   }
 
   async function loadTrend(targetAoi: BBox) {
@@ -822,7 +860,7 @@ export default function CaspianTwin() {
     const trend = await loadTrend(targetAoi);
     let imageDataUrl: string | null = null;
     try {
-      imageDataUrl = captureAoiImage();
+      imageDataUrl = await captureAoiImage(targetAoi);
     } catch {
       imageDataUrl = null;
     }
@@ -1013,7 +1051,7 @@ export default function CaspianTwin() {
               <p>{scanStage === "scanning" ? "Сканирующая рамка ищет спектрально отличающийся прибрежный участок." : scanStage === "analyzing" ? "Кадр AOI и ряд 2020–2026 переданы в Groq для осторожной интерпретации." : activeFilter.explanation}</p>
               <div className="analysis-facts"><span><Check size={14} /> Реальный вырез карты AOI</span><span><Check size={14} /> Sentinel‑1/2/3 + годы сравнения</span><span><Check size={14} /> Результат — кандидат для полевой проверки</span></div>
               {(scanStage === "scanning" || scanStage === "analyzing") && <div className="ai-progress"><LoaderCircle className="spin" size={18} /><span>{scanStage === "scanning" ? "Поиск вдоль побережья…" : "Groq Vision изучает снимок…"}</span></div>}
-              {(trendStatus === "error" || aiStatus === "error") && <p className="ai-error">Расчёт не завершён. Карта и фильтры продолжают работать; можно повторить.</p>}
+              {(aiStatus === "error" || (trendStatus === "error" && aiStatus !== "ready")) && <p className="ai-error">Расчёт не завершён. Карта и фильтры продолжают работать; можно повторить.</p>}
               {trendResult && <div className="prediction-result"><div className="prediction-head"><div><span>ПРОГНОЗ 2027</span><strong>{`${((trendResult.forecast.waterShare ?? 0) * 100).toFixed(1)}% воды в области`}</strong></div><b>{Math.round(trendResult.confidence * 100)}% R²</b></div><TrendChart result={trendResult} metric={trendMetric} /><small>{trendResult.method}</small><p>{trendResult.limitation}</p></div>}
               {aiResult && <div className="ai-result"><div className="ai-result-head"><strong>Groq Vision · Qwen 3.6 · AOI + метрики</strong><span className={`risk ${aiResult.risk.replace(" ", "-")}`}>риск: {aiResult.risk}</span></div><p>{aiResult.summary}</p>{aiResult.evidence.length > 0 && <div><strong>Основание</strong><ul>{aiResult.evidence.map((item) => <li key={item}>{item}</li>)}</ul></div>}{aiResult.nextSteps.length > 0 && <div><strong>Следующие шаги</strong><ul>{aiResult.nextSteps.map((item) => <li key={item}>{item}</li>)}</ul></div>}<small>{aiResult.limitation}</small></div>}
             </section>
