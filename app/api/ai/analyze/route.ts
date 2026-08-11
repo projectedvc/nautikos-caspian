@@ -17,6 +17,11 @@ type AnalysisRequest = {
   };
 };
 
+// Vercel's Node launcher currently loads route handlers through CommonJS.
+// This project is ESM (package.json `type: module`), so keep this fetch-only
+// handler on the Edge runtime and avoid the CJS/ESM launcher mismatch.
+export const runtime = "edge";
+
 type GroqResponse = {
   choices?: Array<{ message?: { content?: string } }>;
   model?: string;
