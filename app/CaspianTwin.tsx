@@ -22,12 +22,13 @@ import {
 } from "lucide-react";
 import { GeoJSONSource, Map as MapLibreMap, type MapOptions, StyleSpecification } from "maplibre-gl";
 import { PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import FilterPhotoGallery from "./FilterPhotoGallery";
 
 type BBox = [number, number, number, number];
 type DatasetKey = "s2" | "s1" | "s3";
 type ViewKey = "rivers" | "shoreline" | "coastalVegetation" | "oilCandidates" | "waterTemperature" | "waterColour";
 type LayerKey = "true-color" | "rivers" | "shoreline" | "vegetation" | "oil-candidates" | "water-temperature" | "water-colour";
-type WorkspaceMode = "monitoring" | "solutions";
+type WorkspaceMode = "monitoring" | "solutions" | "filters";
 type SidebarSection = "water" | "land" | "tools";
 type SolutionKey = "discharge" | "wetland" | "shoreline" | "vegetation" | "oil-response";
 type AoiScreen = { left: number; top: number; width: number; height: number };
@@ -920,20 +921,21 @@ export default function CaspianTwin() {
   }
 
   return (
-    <main className={`workspace-shell ${inspectorOpen ? "" : "inspector-closed"}`} data-theme={theme}>
+    <main className={`workspace-shell ${inspectorOpen ? "" : "inspector-closed"} ${workspaceMode === "filters" ? "filters-view" : ""}`} data-theme={theme}>
       <header className="app-header">
         <div className="brand-lockup"><div className="brand-symbol"><Waves size={20} /></div><div><strong>Nautikos</strong><span>Экологический интеллект Каспия</span></div></div>
         <nav className="main-nav" aria-label="Разделы платформы">
           <button className={workspaceMode === "monitoring" ? "active" : ""} onClick={() => { setWorkspaceMode("monitoring"); setTimelapsePlaying(false); }}>Мониторинг</button>
           <button className={workspaceMode === "solutions" ? "active" : ""} onClick={() => setWorkspaceMode("solutions")}>Решения</button>
+          <button className={workspaceMode === "filters" ? "active" : ""} onClick={() => { setWorkspaceMode("filters"); setTimelapsePlaying(false); }}>Фильтры</button>
         </nav>
         <div className="header-actions">
           <button aria-label={theme === "light" ? "Включить тёмную тему" : "Включить светлую тему"} title={theme === "light" ? "Тёмная тема" : "Светлая тема"} onClick={() => setTheme((value) => value === "light" ? "dark" : "light")}>{theme === "light" ? <Moon size={18} /> : <Sun size={18} />}</button>
-          <button aria-label={inspectorOpen ? "Скрыть правую панель" : "Открыть правую панель"} title={inspectorOpen ? "Скрыть панель" : "Открыть панель"} onClick={() => setInspectorOpen((value) => !value)}>{inspectorOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}</button>
+          {workspaceMode !== "filters" && <button aria-label={inspectorOpen ? "Скрыть правую панель" : "Открыть правую панель"} title={inspectorOpen ? "Скрыть панель" : "Открыть панель"} onClick={() => setInspectorOpen((value) => !value)}>{inspectorOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}</button>}
         </div>
       </header>
 
-      <aside className="filter-panel">
+      <aside className={`filter-panel ${workspaceMode === "filters" ? "workspace-hidden" : ""}`}>
         {workspaceMode === "solutions" ? <>
           <div className="panel-heading"><span>КАСПИЙ · СЦЕНАРИЙ</span><h1>Решение для участка</h1></div>
           <div className="filter-list grouped solution-list">
@@ -977,7 +979,7 @@ export default function CaspianTwin() {
         </>}
       </aside>
 
-      <section className="map-workspace">
+      <section className={`map-workspace ${workspaceMode === "filters" ? "workspace-hidden" : ""}`}>
         <div ref={mapNode} className="map-root" />
         <div ref={compareMapNode} className={`map-root compare-map ${workspaceMode === "solutions" || !compareEnabled ? "hidden" : ""}`} style={{ clipPath: `inset(0 0 0 ${swipe}%)` }} />
         {aoi && aoiScreen && <svg className="geospatial-selection" aria-label={`Выбранная область ${selectedArea ? formatArea(selectedArea) : ""}`}>
@@ -1019,7 +1021,7 @@ export default function CaspianTwin() {
         <div className="map-statusbar"><span>{workspaceMode === "solutions" ? `Решение · ${SOLUTIONS.find((item) => item.id === solutionType)?.label} · июль ${timelapseYear}` : compareEnabled ? `${beforeYear} ↔ ${afterYear} · ${activeFilter.label}` : `${afterYear} · ${activeFilter.label}`}</span><span>Nautikos · локальные продукты Каспия</span></div>
       </section>
 
-      <aside className={`inspector ${inspectorOpen ? "" : "hidden"}`}>
+      <aside className={`inspector ${inspectorOpen ? "" : "hidden"} ${workspaceMode === "filters" ? "workspace-hidden" : ""}`}>
         {workspaceMode === "solutions" ? (
           <>
             <div className="inspector-head"><div><span>СЦЕНАРИЙ И РЕШЕНИЯ</span><h2>Прогноз 2027</h2></div>{aoi && <button onClick={clearAoi}><X size={17} /></button>}</div>
@@ -1061,6 +1063,7 @@ export default function CaspianTwin() {
           </>
         )}
       </aside>
+      {workspaceMode === "filters" && <FilterPhotoGallery />}
     </main>
   );
 }

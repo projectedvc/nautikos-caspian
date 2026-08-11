@@ -47,6 +47,8 @@ button { color: inherit; }
 
 .workspace-shell.inspector-closed { grid-template-columns: 282px minmax(520px, 1fr) 0; }
 
+.workspace-hidden { display: none !important; }
+
 .app-header {
   z-index: 30;
   grid-column: 1 / -1;
