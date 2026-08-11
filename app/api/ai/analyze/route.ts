@@ -93,7 +93,27 @@ export async function POST(request: Request) {
   const timeout = setTimeout(() => controller.abort(), 35_000);
 
   try {
-    const response = await fetch(GROQ_URL, {
+    const basePayload = {
+      model,
+      temperature: 0.1,
+      max_completion_tokens: 900,
+      reasoning_effort: "none",
+      messages: [
+        {
+          role: "system",
+          content: [
+            "Ты геоаналитик экологического мониторинга Каспийского моря.",
+            "Если приложено изображение, анализируй только видимый вырез AOI; не выдумывай координаты, объекты и источники загрязнения.",
+            "areaKm2 — площадь выбранной зоны, а не площадь ущерба.",
+            "Тёмная SAR-аномалия, изменение цвета воды, отступление береговой линии или стресс растительности — только кандидат для проверки.",
+            "Верни строго JSON на русском: {summary: string, risk: 'низкий'|'средний'|'высокий'|'не определён', evidence: string[], nextSteps: string[], limitation: string}.",
+            "summary — до 70 слов; evidence и nextSteps — по 2–3 коротких пункта.",
+          ].join(" "),
+        },
+        { role: "user", content: userContent },
+      ],
+    };
+    const callGroq = (strictJson: boolean) => fetch(GROQ_URL, {
       method: "POST",
       headers: {
         authorization: `Bearer ${apiKey}`,
@@ -101,30 +121,22 @@ export async function POST(request: Request) {
       },
       signal: controller.signal,
       body: JSON.stringify({
-        model,
-        temperature: 0.1,
-        max_completion_tokens: 900,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: [
-              "Ты геоаналитик экологического мониторинга Каспийского моря.",
-              "Если приложено изображение, анализируй только видимый вырез AOI; не выдумывай координаты, объекты и источники загрязнения.",
-              "areaKm2 — площадь выбранной зоны, а не площадь ущерба.",
-              "Тёмная SAR-аномалия, изменение цвета воды, отступление береговой линии или стресс растительности — только кандидат для проверки.",
-              "Верни строго JSON на русском: {summary: string, risk: 'низкий'|'средний'|'высокий'|'не определён', evidence: string[], nextSteps: string[], limitation: string}.",
-              "summary — до 70 слов; evidence и nextSteps — по 2–3 коротких пункта.",
-            ].join(" "),
-          },
-          { role: "user", content: userContent },
-        ],
+        ...basePayload,
+        ...(strictJson ? { response_format: { type: "json_object" } } : {}),
       }),
     });
 
+    let response = await callGroq(true);
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 1200);
-      return Response.json({ error: "Groq не выполнил анализ", detail }, { status: response.status });
+      if (response.status === 400 && detail.includes("json_validate_failed")) {
+        response = await callGroq(false);
+      } else {
+        return Response.json({ error: "Groq не выполнил анализ", detail }, { status: response.status });
+      }
+    }
+    if (!response.ok) {
+      return Response.json({ error: "Groq не выполнил анализ", detail: (await response.text()).slice(0, 1200) }, { status: response.status });
     }
 
     const payload = await response.json() as GroqResponse;
