@@ -7,6 +7,9 @@ import {
   ScanLine,
   ThermometerSun,
   Waves,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -159,7 +162,10 @@ export default function FilterPhotoGallery() {
   const [afterYear, setAfterYear] = useState<number>(2026);
   const [swipe, setSwipe] = useState(50);
   const [frameStates, setFrameStates] = useState<Record<string, FrameState>>({});
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
   const viewportRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
 
   const product = useMemo(
     () => PRODUCTS.find((item) => item.id === productId) ?? PRODUCTS[0],
@@ -172,6 +178,8 @@ export default function FilterPhotoGallery() {
 
   useEffect(() => {
     setFrameStates((current) => ({ ...current, [beforeUrl]: "loading", [afterUrl]: "loading" }));
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
   }, [beforeUrl, afterUrl]);
 
   const setFrameState = (url: string, state: FrameState) => {
@@ -185,13 +193,45 @@ export default function FilterPhotoGallery() {
   };
 
   const startSwipe = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     updateSwipe(event.clientX);
   };
 
   const moveSwipe = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.stopPropagation();
     if (event.currentTarget.hasPointerCapture(event.pointerId)) updateSwipe(event.clientX);
   };
+
+  const startPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("button, select, input, .filter-gallery__divider")) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    panRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: pan.x, originY: pan.y };
+  };
+
+  const movePan = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = panRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    setPan({ x: drag.originX + event.clientX - drag.startX, y: drag.originY + event.clientY - drag.startY });
+  };
+
+  const stopPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (panRef.current?.pointerId === event.pointerId) panRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  const changeZoom = (next: number) => {
+    const value = Math.min(4, Math.max(1, next));
+    setZoom(value);
+    if (value === 1) setPan({ x: 0, y: 0 });
+  };
+
+  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    changeZoom(zoom + (event.deltaY < 0 ? 0.25 : -0.25));
+  };
+
+  const imageTransform = { transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})` };
 
   const handleSwipeKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "ArrowLeft") {
@@ -267,8 +307,11 @@ export default function FilterPhotoGallery() {
         <div
           ref={viewportRef}
           className="filter-gallery__viewport"
-          onPointerDown={startSwipe}
-          onPointerMove={moveSwipe}
+          onPointerDown={startPan}
+          onPointerMove={movePan}
+          onPointerUp={stopPan}
+          onPointerCancel={stopPan}
+          onWheel={handleWheel}
         >
           <div className="filter-gallery__frame filter-gallery__frame--before">
             {beforeState !== "missing" && (
@@ -277,6 +320,7 @@ export default function FilterPhotoGallery() {
                 src={beforeUrl}
                 alt={`${product.title}, ${beforeYear}`}
                 draggable={false}
+                style={imageTransform}
                 onLoad={() => setFrameState(beforeUrl, "ready")}
                 onError={() => setFrameState(beforeUrl, "missing")}
               />
@@ -291,6 +335,7 @@ export default function FilterPhotoGallery() {
                 src={afterUrl}
                 alt={`${product.title}, ${afterYear}`}
                 draggable={false}
+                style={imageTransform}
                 onLoad={() => setFrameState(afterUrl, "ready")}
                 onError={() => setFrameState(afterUrl, "missing")}
               />
@@ -321,9 +366,18 @@ export default function FilterPhotoGallery() {
             aria-valuemin={4}
             aria-valuemax={96}
             aria-valuenow={Math.round(swipe)}
+            onPointerDown={startSwipe}
+            onPointerMove={moveSwipe}
             onKeyDown={handleSwipeKey}
           >
             <span aria-hidden="true">↔</span>
+          </div>
+
+          <div className="filter-gallery__map-controls" aria-label="Масштаб изображения">
+            <button type="button" aria-label="Увеличить" title="Увеличить" onClick={() => changeZoom(zoom + 0.25)}><ZoomIn size={17} /></button>
+            <button type="button" aria-label="Уменьшить" title="Уменьшить" disabled={zoom <= 1} onClick={() => changeZoom(zoom - 0.25)}><ZoomOut size={17} /></button>
+            <button type="button" aria-label="Сбросить положение" title="Сбросить положение" disabled={zoom === 1 && pan.x === 0 && pan.y === 0} onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}><RotateCcw size={16} /></button>
+            <span>{Math.round(zoom * 100)}%</span>
           </div>
 
           <div className="filter-gallery__legend">

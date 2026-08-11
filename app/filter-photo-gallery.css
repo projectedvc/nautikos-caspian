@@ -132,12 +132,13 @@
   min-height: 430px;
   overflow: hidden;
   background: #102a35;
-  cursor: ew-resize;
+  cursor: grab;
   touch-action: none;
   user-select: none;
 }
 .filter-gallery__frame { position: absolute; inset: 0; overflow: hidden; }
-.filter-gallery__frame img { width: 100%; height: 100%; object-fit: cover; object-position: center; image-rendering: auto; pointer-events: none; }
+.filter-gallery__viewport:active { cursor: grabbing; }
+.filter-gallery__frame img { width: 100%; height: 100%; object-fit: cover; object-position: center; image-rendering: auto; pointer-events: none; transform-origin: center; will-change: transform; }
 .filter-gallery__frame--after { z-index: 1; }
 .filter-gallery__frame-fallback {
   position: absolute;
@@ -199,6 +200,7 @@
   box-shadow: 0 0 0 1px rgba(6, 50, 65, 0.25);
   transform: translateX(-1px);
   outline: none;
+  cursor: ew-resize;
 }
 .filter-gallery__divider span {
   position: absolute;
@@ -217,6 +219,37 @@
   transform: translate(-50%, -50%);
 }
 .filter-gallery__divider:focus-visible span { outline: 3px solid #f4c549; outline-offset: 3px; }
+
+.filter-gallery__map-controls {
+  z-index: 9;
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 10px;
+  background: rgba(9, 31, 40, 0.82);
+  color: white;
+  box-shadow: 0 6px 20px rgba(2, 18, 25, 0.2);
+  backdrop-filter: blur(10px);
+}
+.filter-gallery__map-controls button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  cursor: pointer;
+}
+.filter-gallery__map-controls button:hover:not(:disabled) { background: var(--gallery-accent); }
+.filter-gallery__map-controls button:disabled { opacity: 0.35; cursor: default; }
+.filter-gallery__map-controls span { min-width: 44px; padding-inline: 4px; font-size: 10px; font-weight: 800; text-align: center; }
 
 .filter-gallery__legend {
   z-index: 5;
@@ -298,6 +331,7 @@
   .filter-gallery__stage { grid-template-rows: auto minmax(58dvh, 520px) auto; }
   .filter-gallery__viewport { min-height: 520px; }
   .filter-gallery__legend { right: 10px; bottom: 10px; left: 10px; min-width: 0; }
+  .filter-gallery__map-controls { right: 10px; bottom: 84px; }
   .filter-gallery__frame-label { top: 10px; }
   .filter-gallery__frame-label--before { left: 10px; }
   .filter-gallery__frame-label--after { right: 10px; }
