@@ -53,6 +53,9 @@ test("uses the local Jupyter COG service, six real Copernicus filters and AOI to
   assert.match(component, /\/v2\/aoi\/export/);
   assert.match(component, /SOLUTIONS/);
   assert.match(component, /selection-rectangle/);
+  assert.match(component, /Определить проблемную зону/);
+  assert.match(component, /problem-scan-overlay/);
+  assert.match(component, /startProblemScan/);
   assert.match(component, /type: "raster"/);
   assert.match(component, /server\.arcgisonline\.com\/ArcGIS\/rest\/services\/World_Imagery/);
   assert.doesNotMatch(component, /return `\/api\/basemap/);
@@ -81,6 +84,8 @@ test("uses the local Jupyter COG service, six real Copernicus filters and AOI to
   assert.match(trendRoute, /regression/);
   assert.match(aiRoute, /api\.groq\.com\/openai\/v1\/chat\/completions/);
   assert.match(aiRoute, /image_url/);
+  assert.match(aiRoute, /qwen\/qwen3\.6-27b/);
+  assert.match(aiRoute, /Groq API не настроен/);
   assert.match(server, /\/health/);
   assert.match(server, /Access-Control-Allow-Origin/);
 });

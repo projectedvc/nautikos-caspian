@@ -245,6 +245,36 @@ button { color: inherit; }
   letter-spacing: 0.08em;
   white-space: nowrap;
 }
+.problem-scan-button { border-color: #1185a8 !important; background: linear-gradient(135deg, #e8fbff, #eef8ff) !important; color: #075b77 !important; }
+.problem-scan-button:disabled { cursor: progress; opacity: 1; }
+.problem-scan-overlay { position: absolute; z-index: 19; inset: 0; overflow: hidden; pointer-events: none; background: linear-gradient(90deg, transparent 0 46%, rgba(27, 205, 240, 0.05) 50%, transparent 54%); }
+.problem-scan-square {
+  position: absolute;
+  width: clamp(130px, 19vw, 250px);
+  aspect-ratio: 1;
+  border: 2px solid #59f1e3;
+  border-radius: 5px;
+  background: repeating-linear-gradient(0deg, rgba(25, 229, 214, 0.08) 0 1px, transparent 1px 22px), repeating-linear-gradient(90deg, rgba(25, 229, 214, 0.08) 0 1px, transparent 1px 22px);
+  box-shadow: 0 0 0 1px rgba(4, 42, 55, 0.75), 0 0 28px rgba(28, 237, 218, 0.55), inset 0 0 20px rgba(20, 219, 208, 0.13);
+  animation: shoreline-scan 3.15s cubic-bezier(.38,.05,.56,.95) forwards;
+}
+.problem-scan-square::before,
+.problem-scan-square::after { position: absolute; width: 23px; height: 23px; border-color: #fff; content: ""; }
+.problem-scan-square::before { top: -4px; left: -4px; border-top: 4px solid; border-left: 4px solid; }
+.problem-scan-square::after { right: -4px; bottom: -4px; border-right: 4px solid; border-bottom: 4px solid; }
+.problem-scan-square i { position: absolute; right: 0; left: 0; height: 2px; background: #fff; box-shadow: 0 0 13px #46f4e1; animation: scan-line 0.85s linear infinite alternate; }
+.problem-scan-square span { position: absolute; top: -27px; left: -2px; padding: 6px 8px; border-radius: 4px; background: rgba(3, 44, 57, 0.92); color: #8cfff4; font-size: 8px; font-weight: 850; letter-spacing: 0.12em; white-space: nowrap; }
+.problem-lock-label { position: absolute; z-index: 20; display: flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid #67eadd; border-radius: 5px; background: rgba(3, 43, 56, 0.93); box-shadow: 0 6px 18px rgba(3, 31, 42, 0.28); color: #97fff4; font-size: 8px; font-weight: 800; letter-spacing: 0.09em; pointer-events: none; }
+.ai-progress { display: flex; align-items: center; gap: 9px; margin-top: 10px; padding: 10px; border: 1px solid #b7dce7; border-radius: 7px; background: #edf9fb; color: #176981; font-size: 10px; font-weight: 700; }
+@keyframes shoreline-scan {
+  0% { top: 10%; left: 7%; transform: scale(.78); opacity: .35; }
+  22% { top: 4%; left: 61%; transform: scale(1); opacity: 1; }
+  45% { top: 38%; left: 72%; transform: scale(.9); }
+  68% { top: 60%; left: 16%; transform: scale(1.05); }
+  86% { top: 34%; left: 33%; transform: scale(.86); }
+  100% { top: 9%; left: 48%; transform: scale(.72); opacity: 1; }
+}
+@keyframes scan-line { from { top: 5%; } to { top: 94%; } }
 .drawing-hint,
 .scene-required {
   position: absolute;
@@ -679,6 +709,8 @@ button { color: inherit; }
   background: #1b4b5e;
   color: #8ee0ff;
 }
+.workspace-shell[data-theme="dark"] .problem-scan-button { border-color: #2daac4 !important; background: linear-gradient(135deg, #123744, #102c39) !important; color: #8eeeff !important; }
+.workspace-shell[data-theme="dark"] .ai-progress { border-color: #285667; background: #102d38; color: #8ee8f8; }
 .workspace-shell[data-theme="dark"] .timelapse-panel {
   border-color: #38545f;
   background: rgba(13, 28, 35, 0.96);

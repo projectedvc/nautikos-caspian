@@ -31,6 +31,7 @@ type WorkspaceMode = "monitoring" | "solutions";
 type SidebarSection = "water" | "land" | "tools";
 type SolutionKey = "discharge" | "wetland" | "shoreline" | "vegetation" | "oil-response";
 type AoiScreen = { left: number; top: number; width: number; height: number };
+type ScanStage = "idle" | "scanning" | "analyzing" | "ready" | "error";
 
 type AiResult = {
   summary: string;
@@ -75,6 +76,14 @@ const YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
 const DATA_API_BASE = (process.env.NEXT_PUBLIC_NAUTIKOS_DATA_URL ?? "").replace(/\/$/, "");
 const WATER_FILTERS: ViewKey[] = ["oilCandidates", "waterTemperature", "waterColour"];
 const LAND_FILTERS: ViewKey[] = ["rivers", "shoreline", "coastalVegetation"];
+const PROBLEM_HOTSPOTS: Record<ViewKey, { bbox: BBox; label: string }> = {
+  rivers: { bbox: [51.55, 46.45, 52.35, 47.08], label: "дельта Урала и северное мелководье" },
+  shoreline: { bbox: [51.55, 46.45, 52.35, 47.08], label: "северо-восточный берег Каспия" },
+  coastalVegetation: { bbox: [48.70, 38.75, 49.35, 39.38], label: "прибрежные влажные земли Гиляна" },
+  oilCandidates: { bbox: [49.62, 40.12, 50.28, 40.62], label: "прибрежная зона Апшеронского полуострова" },
+  waterTemperature: { bbox: [51.45, 46.20, 52.45, 47.10], label: "северное мелководье у дельты Урала" },
+  waterColour: { bbox: [51.45, 46.20, 52.45, 47.10], label: "шлейфы у дельты Урала" },
+};
 const PRODUCT_BY_LAYER: Record<LayerKey, string> = {
   "true-color": "rgb",
   rivers: "rivers",
@@ -371,6 +380,7 @@ export default function CaspianTwin() {
   const drawPixelStartRef = useRef<[number, number] | null>(null);
   const drawRectRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const swipeDraggingRef = useRef(false);
 
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("monitoring");
@@ -401,6 +411,8 @@ export default function CaspianTwin() {
   const [trendResult, setTrendResult] = useState<TrendResult | null>(null);
   const [aiStatus, setAiStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [aiResult, setAiResult] = useState<AiResult | null>(null);
+  const [scanStage, setScanStage] = useState<ScanStage>("idle");
+  const [scanLocation, setScanLocation] = useState<string>("");
 
   const activeFilter = useMemo(() => filters.find((item) => item.id === activeView) ?? filters[0], [activeView]);
   const visibleFilters = useMemo(() => {
@@ -581,6 +593,10 @@ export default function CaspianTwin() {
     };
   }, []);
 
+  useEffect(() => () => {
+    if (scanTimerRef.current) clearTimeout(scanTimerRef.current);
+  }, []);
+
   function showSelectionNotice(message: string) {
     if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
     setSelectionNotice(message);
@@ -592,6 +608,8 @@ export default function CaspianTwin() {
     setTrendResult(null);
     setAiStatus("idle");
     setAiResult(null);
+    setScanStage("idle");
+    setScanLocation("");
   }
 
   function toggleTimelapse() {
@@ -771,44 +789,96 @@ export default function CaspianTwin() {
     return output.toDataURL("image/jpeg", 0.84);
   }
 
-  async function runAiAnalysis() {
-    if (!aoi || !selectedArea) return;
+  async function loadTrend(targetAoi: BBox) {
     setTrendStatus("loading");
-    setAiStatus("loading");
     setTrendResult(null);
-    setAiResult(null);
     try {
-      const trendResponse = await fetch("/api/sentinel/trend", {
+      const response = await fetch("/api/sentinel/trend", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ bbox: aoi }),
+        body: JSON.stringify({ bbox: targetAoi }),
       });
-      if (!trendResponse.ok) throw new Error(await trendResponse.text());
-      const trend = await trendResponse.json() as TrendResult;
+      if (!response.ok) throw new Error(await response.text());
+      const trend = await response.json() as TrendResult;
       setTrendResult(trend);
       setTrendStatus("ready");
+      return trend;
+    } catch {
+      setTrendStatus("error");
+      return null;
+    }
+  }
 
+  async function runTrendOnly() {
+    if (!aoi) return;
+    await loadTrend(aoi);
+  }
+
+  async function runAiAnalysis(targetAoi: BBox, locationHint: string) {
+    const areaKm2 = bboxAreaKm2(targetAoi);
+    setAiStatus("loading");
+    setAiResult(null);
+
+    const trend = await loadTrend(targetAoi);
+    let imageDataUrl: string | null = null;
+    try {
+      imageDataUrl = captureAoiImage();
+    } catch {
+      imageDataUrl = null;
+    }
+
+    try {
       const aiResponse = await fetch("/api/ai/analyze", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           filter: activeFilter.label,
           filterDescription: activeFilter.explanation,
-          areaKm2: selectedArea,
+          locationHint,
+          areaKm2,
           beforeYear,
           afterYear,
-          imageDataUrl: captureAoiImage(),
-          forecast: { ...trend.forecast, slopes: trend.slopes, confidence: trend.confidence, method: trend.method },
+          imageDataUrl,
+          forecast: trend ? { ...trend.forecast, slopes: trend.slopes, confidence: trend.confidence, method: trend.method } : null,
         }),
       });
       if (!aiResponse.ok) throw new Error(await aiResponse.text());
       const payload = await aiResponse.json() as { analysis: AiResult };
       setAiResult(payload.analysis);
       setAiStatus("ready");
+      setScanStage("ready");
+      showSelectionNotice("Groq Vision завершил анализ найденной прибрежной зоны.");
     } catch {
-      setTrendStatus((value) => value === "ready" ? value : "error");
       setAiStatus("error");
+      setScanStage("error");
+      showSelectionNotice("Groq не завершил анализ. Проверьте ключ API и повторите поиск.");
     }
+  }
+
+  function startProblemScan() {
+    if (scanStage === "scanning" || scanStage === "analyzing") return;
+    if (scanTimerRef.current) clearTimeout(scanTimerRef.current);
+    const target = PROBLEM_HOTSPOTS[activeView];
+    setWorkspaceMode("monitoring");
+    setSidebarSection("tools");
+    setInspectorOpen(true);
+    setAoi(null);
+    setTrendResult(null);
+    setTrendStatus("idle");
+    setAiResult(null);
+    setAiStatus("idle");
+    setScanLocation(target.label);
+    setScanStage("scanning");
+    setSelectionNotice("Спектральный сканер проходит вдоль побережья Каспия…");
+    mapRef.current?.fitBounds([[CASPIAN_BBOX[0], CASPIAN_BBOX[1]], [CASPIAN_BBOX[2], CASPIAN_BBOX[3]]], { padding: 50, duration: 700 });
+
+    scanTimerRef.current = setTimeout(() => {
+      setAoi(target.bbox);
+      setScanStage("analyzing");
+      mapRef.current?.fitBounds([[target.bbox[0], target.bbox[1]], [target.bbox[2], target.bbox[3]]], { padding: 130, duration: 950 });
+      showSelectionNotice(`Найдена зона для проверки: ${target.label}. Groq анализирует спутниковый фрагмент.`);
+      scanTimerRef.current = setTimeout(() => { void runAiAnalysis(target.bbox, target.label); }, 1500);
+    }, 3200);
   }
 
   return (
@@ -817,7 +887,7 @@ export default function CaspianTwin() {
         <div className="brand-lockup"><div className="brand-symbol"><Waves size={20} /></div><div><strong>Nautikos</strong><span>Экологический интеллект Каспия</span></div></div>
         <nav className="main-nav" aria-label="Разделы платформы">
           <button className={workspaceMode === "monitoring" ? "active" : ""} onClick={() => { setWorkspaceMode("monitoring"); setTimelapsePlaying(false); }}>Мониторинг</button>
-          <button className={workspaceMode === "solutions" ? "active" : ""} onClick={() => { setWorkspaceMode("solutions"); if (aoi && trendStatus === "idle") void runAiAnalysis(); }}>Решения</button>
+          <button className={workspaceMode === "solutions" ? "active" : ""} onClick={() => setWorkspaceMode("solutions")}>Решения</button>
         </nav>
         <div className="header-actions">
           <button aria-label={theme === "light" ? "Включить тёмную тему" : "Включить светлую тему"} title={theme === "light" ? "Тёмная тема" : "Светлая тема"} onClick={() => setTheme((value) => value === "light" ? "dark" : "light")}>{theme === "light" ? <Moon size={18} /> : <Sun size={18} />}</button>
@@ -859,6 +929,7 @@ export default function CaspianTwin() {
         ) : (
           <div className="sidebar-tools">
             <label><span>РАБОЧИЙ РАЙОН</span><select value={selectedRegion} onChange={(event) => changeRegion(event.target.value)}>{regions.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}</select></label>
+            <button className={`problem-scan-button ${scanStage === "scanning" || scanStage === "analyzing" ? "active" : ""}`} disabled={scanStage === "scanning" || scanStage === "analyzing"} onClick={startProblemScan}>{scanStage === "scanning" || scanStage === "analyzing" ? <LoaderCircle className="spin" size={18} /> : <ScanSearch size={18} />}<span><strong>{scanStage === "scanning" ? "Сканирую побережье…" : scanStage === "analyzing" ? "Groq анализирует зону…" : "Определить проблемную зону"}</strong><small>Автопоиск кандидата → снимок AOI → Groq Vision</small></span></button>
             <button className={drawing ? "active" : ""} onClick={drawing ? cancelDraw : beginDraw}>{drawing ? <X size={17} /> : <BoxSelect size={17} />}<span><strong>{drawing ? "Отменить выделение" : "Выбрать рабочую область"}</strong><small>Для площади, воды или AI</small></span></button>
             <button onClick={() => changeRegion("all")}><Focus size={17} /><span><strong>Показать весь Каспий</strong><small>Вернуть общий обзор</small></span></button>
             {aoi && <button onClick={exportAoiImage}><Download size={17} /><span><strong>Сохранить снимок области</strong><small>PNG без панелей интерфейса</small></span></button>}
@@ -880,6 +951,8 @@ export default function CaspianTwin() {
         </svg>}
         {drawing && <div className="draw-capture" onPointerDown={onDrawPointerDown} onPointerMove={onDrawPointerMove} onPointerUp={onDrawPointerUp} onPointerCancel={cancelDraw} />}
         {drawing && drawRect && <div className="selection-rectangle" style={{ left: drawRect.left, top: drawRect.top, width: drawRect.width, height: drawRect.height }}><span>РАБОЧАЯ ОБЛАСТЬ</span></div>}
+        {scanStage === "scanning" && <div className="problem-scan-overlay" aria-label="Поиск проблемной зоны"><div className="problem-scan-square"><i /><span>СПЕКТРАЛЬНЫЙ ПОИСК</span></div></div>}
+        {scanStage === "analyzing" && aoiScreen && <div className="problem-lock-label" style={{ left: Math.max(12, aoiScreen.left), top: Math.max(12, aoiScreen.top - 38) }}><LoaderCircle className="spin" size={14} /> GROQ VISION · АНАЛИЗ AOI</div>}
 
         {workspaceMode === "monitoring" && <div className={`year-controls ${compareEnabled ? "comparison" : "single"}`} aria-label={compareEnabled ? "Выбор годов сравнения" : "Выбор одного года"}>
           <button className={`compare-toggle ${compareEnabled ? "active" : ""}`} aria-pressed={compareEnabled} onClick={() => {
@@ -920,7 +993,7 @@ export default function CaspianTwin() {
                 <section className="solution-forecast-card">
                   <div><span>ОБЛАСТЬ</span><strong>{selectedArea ? formatArea(selectedArea) : "—"}</strong></div><div><span>МОДЕЛЬ</span><strong>2020–2027</strong></div>
                   {trendResult ? <TrendChart result={trendResult} metric={trendMetric} /> : <div className="forecast-placeholder"><LoaderCircle className={trendStatus === "loading" ? "spin" : ""} size={22} /><span>{trendStatus === "loading" ? "Строю спутниковый ряд…" : trendStatus === "error" ? "Локальный сценарий нанесён на карту" : "Карта готова к прогнозу"}</span></div>}
-                  <button className="ai-run" disabled={trendStatus === "loading" || aiStatus === "loading"} onClick={runAiAnalysis}>{trendStatus === "loading" || aiStatus === "loading" ? <LoaderCircle className="spin" size={15} /> : <Sparkles size={15} />}{trendResult ? "Пересчитать сценарий 2027" : "Рассчитать сценарий 2027"}</button>
+                  <button className="ai-run" disabled={trendStatus === "loading"} onClick={() => void runTrendOnly()}>{trendStatus === "loading" ? <LoaderCircle className="spin" size={15} /> : <TrendingUp size={15} />}{trendResult ? "Пересчитать сценарий 2027" : "Рассчитать сценарий 2027"}</button>
                 </section>
                 <section className="solution-note"><Check size={15} /><span>Контур области сохраняет координаты при зуме и перемещении карты.</span></section>
               </div>
@@ -934,12 +1007,12 @@ export default function CaspianTwin() {
           <div className="empty-inspector"><div className="empty-map-icon"><BoxSelect size={26} /></div><h3>Карта работает без выделения</h3><p>Сравнивайте весь Каспий, годы и фильтры. Выделяйте участок только для измерений или подробного анализа.</p><button onClick={beginDraw}><BoxSelect size={16} /> Выбрать область</button><button className="secondary-action" onClick={() => { setAoi(CASPIAN_BBOX); resetAnalysis(); }}>Выбрать весь Каспий</button></div>
         ) : (
           <div className="inspector-content">
-            <section className="aoi-summary"><div><span>ПЛОЩАДЬ</span><strong>{selectedArea ? formatArea(selectedArea) : "—"}</strong></div><div><span>ПЕРИОД</span><strong>2020–2026</strong></div><div className="aoi-actions"><button onClick={exportAoi}><Download size={15} /> GeoJSON</button><button onClick={exportAoiImage}><Download size={15} /> Снимок PNG</button><button onClick={runAiAnalysis}><Droplets size={15} /> Доля воды</button><button onClick={runAiAnalysis}><Sparkles size={15} /> AI-анализ</button></div></section>
+            <section className="aoi-summary"><div><span>ПЛОЩАДЬ</span><strong>{selectedArea ? formatArea(selectedArea) : "—"}</strong></div><div><span>ПЕРИОД</span><strong>2020–2026</strong></div><div className="aoi-actions"><button onClick={exportAoi}><Download size={15} /> GeoJSON</button><button onClick={exportAoiImage}><Download size={15} /> Снимок PNG</button></div></section>
             <section className="analysis-card">
-              <div className="analysis-title"><span className="analysis-icon"><Sparkles size={18} /></span><div><span>СПУТНИКОВЫЕ МЕТРИКИ + AI</span><h3>Сценарий на 2027</h3></div></div>
-              <p>{activeFilter.explanation}</p>
-              <div className="analysis-facts"><span><Check size={14} /> Все 7 лет, одинаковый сезон</span><span><Check size={14} /> Sentinel‑2 L2A + Sentinel‑1 GRD + Sentinel‑3 SLSTR/OLCI</span><span><Check size={14} /> Линейный тренд + показатель R²</span></div>
-              <button className="ai-run" disabled={trendStatus === "loading" || aiStatus === "loading"} onClick={runAiAnalysis}>{trendStatus === "loading" || aiStatus === "loading" ? <LoaderCircle className="spin" size={15} /> : <TrendingUp size={15} />}{trendStatus === "loading" ? "Считаю ряд 2020–2026…" : aiStatus === "loading" ? "Groq объясняет прогноз…" : "Рассчитать прогноз 2027"}</button>
+              <div className="analysis-title"><span className="analysis-icon"><Sparkles size={18} /></span><div><span>ИНСТРУМЕНТЫ · GROQ VISION</span><h3>{scanLocation || "Анализ выбранной зоны"}</h3></div></div>
+              <p>{scanStage === "scanning" ? "Сканирующая рамка ищет спектрально отличающийся прибрежный участок." : scanStage === "analyzing" ? "Кадр AOI и ряд 2020–2026 переданы в Groq для осторожной интерпретации." : activeFilter.explanation}</p>
+              <div className="analysis-facts"><span><Check size={14} /> Реальный вырез карты AOI</span><span><Check size={14} /> Sentinel‑1/2/3 + годы сравнения</span><span><Check size={14} /> Результат — кандидат для полевой проверки</span></div>
+              {(scanStage === "scanning" || scanStage === "analyzing") && <div className="ai-progress"><LoaderCircle className="spin" size={18} /><span>{scanStage === "scanning" ? "Поиск вдоль побережья…" : "Groq Vision изучает снимок…"}</span></div>}
               {(trendStatus === "error" || aiStatus === "error") && <p className="ai-error">Расчёт не завершён. Карта и фильтры продолжают работать; можно повторить.</p>}
               {trendResult && <div className="prediction-result"><div className="prediction-head"><div><span>ПРОГНОЗ 2027</span><strong>{`${((trendResult.forecast.waterShare ?? 0) * 100).toFixed(1)}% воды в области`}</strong></div><b>{Math.round(trendResult.confidence * 100)}% R²</b></div><TrendChart result={trendResult} metric={trendMetric} /><small>{trendResult.method}</small><p>{trendResult.limitation}</p></div>}
               {aiResult && <div className="ai-result"><div className="ai-result-head"><strong>Groq Vision · Qwen 3.6 · AOI + метрики</strong><span className={`risk ${aiResult.risk.replace(" ", "-")}`}>риск: {aiResult.risk}</span></div><p>{aiResult.summary}</p>{aiResult.evidence.length > 0 && <div><strong>Основание</strong><ul>{aiResult.evidence.map((item) => <li key={item}>{item}</li>)}</ul></div>}{aiResult.nextSteps.length > 0 && <div><strong>Следующие шаги</strong><ul>{aiResult.nextSteps.map((item) => <li key={item}>{item}</li>)}</ul></div>}<small>{aiResult.limitation}</small></div>}
